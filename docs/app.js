@@ -3,9 +3,10 @@
   const E = window.TydligEngine, KEY = 'mwkcal-v2', OLD = 'tydlig-state-v1';
   const $ = s => document.querySelector(s);
   const canvas = $('#canvas'), world = $('#world'), pad = $('#pad'), fab = $('#padFab'), hint = $('#hint');
-  const menu = $('#menu'), svg = $('#linkLayer'), linkPath = $('#linkPath');
+  const menu = $('#menu'), svg = $('#linkLayer'), ghost = $('#ghost');
+  const LINKC = ['#4cc08f', '#e8643c', '#6058f0', '#e0508a', '#2fb2d6', '#c99a1c'], GHOST_DY = 44;
   const PALETTE = ['#2f80ed', '#ff9500', '#27ae60', '#eb5757', '#9b51e0', '#00a3a3'];
-  const OPS = { '+': '+', '-': '−', '*': '×', '/': '÷', '^': '^' };
+  const OPS = { '+': '+', '-': '−', '*': '×', '/': '/', '^': '^' };
   let state = load(), cur = null, lastDone = null, vals = new Map(), lastVals = new Map(), clip = null, sliding = false;
   const els = new Map(), gels = new Map();
 
@@ -13,9 +14,12 @@
     for (const k of [KEY, OLD]) { try { const s = JSON.parse(localStorage.getItem(k)); if (s && Array.isArray(s.calcs)) return norm(s); } catch (e) {} }
     return norm({});
   }
-  function norm(s) { return { calcs: s.calcs || [], graphs: s.graphs || [], nextId: s.nextId || 1, padOpen: s.padOpen !== false }; }
+  function norm(s) { return { calcs: s.calcs || [], graphs: s.graphs || [], nextId: s.nextId || 1, padOpen: s.padOpen !== false, colors: s.colors || {}, nextColor: s.nextColor || 0, lastId: s.lastId == null ? null : s.lastId }; }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
   const get = id => state.calcs.find(c => c.id === id);
+  // each linked source result gets the next link color in sequence (green, red-orange, indigo, ...)
+  const peekColor = id => LINKC[(state.colors[id] != null ? state.colors[id] : state.nextColor) % LINKC.length];
+  function colorOf(id) { if (state.colors[id] == null) state.colors[id] = state.nextColor++; return LINKC[state.colors[id] % LINKC.length]; }
   const getG = id => state.graphs.find(g => g.id === id);
   const esc = s => String(s).replace(/[&<>"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
   function fmtNum(s) { const neg = s[0] === '-'; if (neg) s = s.slice(1); const [a, b] = s.split('.'); return (neg ? '−' : '') + a.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (b !== undefined ? '.' + b : ''); }
@@ -24,20 +28,23 @@
   // ---------------- rendering ----------------
   function rowHTML(c, linked) {
     const r = vals.get(c.id) || {}, act = cur && cur.id === c.id;
+    const typing = act && cur.tok == null, lastI = c.tokens.length - 1;
     let h = '<span class="expr">';
     c.tokens.forEach((t, i) => {
-      const sel = act && cur.tok === i ? ' sel' : '';
+      const sel = act && cur.tok === i ? ' sel' : typing && i === lastI ? ' cur' : '';
       if (t.t === 'num') h += `<span class="tok num${t.graphVar ? ' gvar' : ''}${sel}" data-i="${i}">${esc(fmtNum(t.v))}</span>`;
-      else if (t.t === 'ref') { const rv = vals.get(t.id); h += `<span class="tok ref${sel}" data-i="${i}">${rv && rv.value != null ? fmtVal(rv.value) : '?'}</span>`; }
-      else if (t.t === 'op') h += `<span class="op">${t.v === '^' ? '^' : OPS[t.v]}</span>`;
-      else h += `<span class="op">${t.t}</span>`;
+      else if (t.t === 'ref') { const rv = vals.get(t.id); h += `<span class="tok ref${sel}" data-i="${i}"${sel ? '' : ` style="color:${colorOf(t.id)}"`}>${rv && rv.value != null ? fmtVal(rv.value) : '?'}</span>`; }
+      else if (t.t === 'op') h += `<span class="op${sel}">${t.v === '^' ? '^' : OPS[t.v]}</span>`;
+      else h += `<span class="op${sel}">${t.t}</span>`;
     });
-    if (act && cur.tok == null) h += '<span class="caret"></span>';
+    if (typing && !c.tokens.length) h += '<span class="caret"></span>';
     h += '</span>';
+    if (typing) return h; // like Tydlig: no result until = (or until an earlier number is edited)
     if (r.error) h += `<span class="eqs">=</span><span class="res err" data-res="${c.id}">${r.error === 'incomplete' ? '…' : '?'}</span>`;
     else if (r.value != null) {
       const fl = !sliding && lastVals.has(c.id) && lastVals.get(c.id) !== r.value && !act ? ' flash' : '';
-      h += `<span class="eqs">=</span><span class="res${linked.has(c.id) ? ' linked' : ''}${fl}" data-res="${c.id}">${fmtVal(r.value)}</span>`;
+      const lk = linked.has(c.id), pill = !lk && c.id === state.lastId;
+      h += `<span class="eqs">=</span><span class="res${lk ? ' linked' : ''}${pill ? ' pill' : ''}${fl}" data-res="${c.id}"${lk ? ` style="border-color:${colorOf(c.id)};color:${colorOf(c.id)}"` : ''}>${fmtVal(r.value)}</span>`;
     }
     return h;
   }
@@ -162,7 +169,7 @@
   // ---------------- editing ----------------
   function newCalc(x, y, tokens) {
     const c = { id: state.nextId++, x: Math.max(4, Math.round(x)), y: Math.max(4, Math.round(y)), tokens: tokens || [] };
-    state.calcs.push(c); cur = { id: c.id, tok: null, fresh: false }; return c;
+    state.calcs.push(c); cur = { id: c.id, tok: null, fresh: false }; state.lastId = c.id; return c;
   }
   function finish() { const c = cur && get(cur.id); cur = null; if (c && !c.tokens.length) removeCalc(c.id); }
   function removeCalc(id) {
@@ -186,13 +193,13 @@
   function press(k) {
     hideMenu();
     if (k === 'collapse') { state.padOpen = false; return render(); }
-    if (k === '=') { const id = cur && cur.id; finish(); lastDone = id && get(id) ? id : null; return render(); }
+    if (k === '=') { const id = cur && cur.id; finish(); lastDone = id && get(id) ? id : null; if (lastDone) state.lastId = lastDone; return render(); }
     if (!cur) {
       if (['back', 'C', ')'].includes(k)) return;
       const prev = lastDone != null && get(lastDone); lastDone = null;
       if (prev) { // Tydlig chaining: new line directly below the finished calc
         const el = els.get(prev.id), x = prev.x, y = prev.y + (el ? el.offsetHeight : 44) + 10, r = vals.get(prev.id);
-        if (/^[+\-*/^%]$/.test(k) && r && r.value != null) { newCalc(x, y, [{ t: 'ref', id: prev.id }, k === '%' ? { t: '%' } : { t: 'op', v: k }]); return render(); }
+        if (/^[+\-*/^%]$/.test(k) && r && r.value != null) { colorOf(prev.id); newCalc(x, y, [{ t: 'ref', id: prev.id }, k === '%' ? { t: '%' } : { t: 'op', v: k }]); return render(); }
         newCalc(x, y);
       } else { const p = freeSpot(); newCalc(p.x, p.y); }
     }
@@ -208,12 +215,12 @@
   }
   function insertRef(id) {
     const src = get(id); if (!src) return;
-    if (!cur) { const el = els.get(id); newCalc(src.x, src.y + (el ? el.offsetHeight : 44) + 12, [{ t: 'ref', id }]); openPad(); return render(); }
+    if (!cur) { const el = els.get(id); colorOf(id); newCalc(src.x, src.y + (el ? el.offsetHeight : 44) + 12, [{ t: 'ref', id }]); openPad(); return render(); }
     const c = get(cur.id);
-    if (cur.tok != null) { if (E.link(state.calcs, id, c.id, cur.tok)) cur.fresh = true; return render(); }
+    if (cur.tok != null) { if (E.link(state.calcs, id, c.id, cur.tok)) { cur.fresh = true; colorOf(id); } return render(); }
     if (cur.id === id || E.dependsOn(state.calcs, id, cur.id)) return;
     if (E.isValueEnd(c.tokens[c.tokens.length - 1])) c.tokens.push({ t: 'op', v: '+' });
-    c.tokens.push({ t: 'ref', id }); render();
+    c.tokens.push({ t: 'ref', id }); colorOf(id); render();
   }
 
   // ---------------- context menu ----------------
@@ -271,10 +278,37 @@
     return null;
   }
   function drawLink(p, x, y) {
-    const resEl = els.get(p.res) && els.get(p.res).querySelector('.res'); if (!resEl) return;
-    const r = resEl.getBoundingClientRect(), x1 = r.left + r.width / 2, y1 = r.top + r.height / 2, k = Math.max(40, Math.abs(y - y1) * 0.5);
-    linkPath.setAttribute('d', `M${x1} ${y1} C${x1} ${y1 + (y >= y1 ? k : -k)} ${x} ${y + (y >= y1 ? -k : k)} ${x} ${y}`);
-    svg.style.display = 'block'; setDrop(dropTarget(x, y, p.res));
+    const resEl = els.get(p.res) && els.get(p.res).querySelector('.res'), r0 = vals.get(p.res); if (!resEl || !r0 || r0.value == null) return;
+    const col = peekColor(p.res), gx = x, gy = y - GHOST_DY;
+    ghost.textContent = fmtVal(r0.value); ghost.style.background = col; ghost.style.left = gx + 'px'; ghost.style.top = gy + 'px'; ghost.classList.add('show');
+    const r = resEl.getBoundingClientRect(), x1 = r.left + r.width / 2, y1 = r.bottom;
+    const curve = (xa, ya, xb, yb) => { const k = Math.max(30, Math.abs(yb - ya) * 0.5); return `M${xa} ${ya} C${xa} ${ya + k} ${xb} ${yb - k} ${xb} ${yb}`; };
+    let d = `<path stroke="${col}" d="${curve(x1, y1, gx, gy - 18)}"/>`;
+    els.forEach((el, id) => { if (id === p.res) return; el.querySelectorAll('.tok.ref').forEach(te => {
+      const c = get(id), t = c && c.tokens[+te.dataset.i]; if (!t || t.id !== p.res) return;
+      const tr = te.getBoundingClientRect(); d += `<path stroke="${col}" d="${curve(x1, y1, tr.left + tr.width / 2, tr.top)}"/>`; }); });
+    svg.innerHTML = d; svg.style.display = 'block';
+    setDrop(nearActive(p.res, gx, gy) ? els.get(cur.id) : dropTarget(gx, gy, p.res));
+  }
+  function endLink() { svg.style.display = 'none'; svg.innerHTML = ''; ghost.classList.remove('show'); setDrop(null); }
+  function nearActive(src, x, y) { // dropping next to / onto the equation being typed
+    if (!cur || cur.tok != null || cur.id === src) return false;
+    const el = els.get(cur.id); if (!el) return false; const r = el.getBoundingClientRect();
+    return x >= r.left - 24 && x <= r.right + 160 && y >= r.top - 32 && y <= r.bottom + 32;
+  }
+  function dropLink(src, gx, gy) {
+    if (nearActive(src, gx, gy)) {
+      const c = get(cur.id); if (E.dependsOn(state.calcs, src, c.id)) return;
+      if (E.isValueEnd(c.tokens[c.tokens.length - 1])) c.tokens.push({ t: 'op', v: '*' });
+      c.tokens.push({ t: 'ref', id: src }); colorOf(src); return;
+    }
+    const tgt = dropTarget(gx, gy, src);
+    if (tgt && tgt.classList.contains('tok')) { if (E.link(state.calcs, src, +tgt.closest('.calc').dataset.id, +tgt.dataset.i)) colorOf(src); return; }
+    if (tgt) { const g = getG(+tgt.dataset.g); addSeries(g, src); vals = E.evaluateAll(state.calcs); fitGraph(g); return; }
+    const hit = document.elementFromPoint(gx, gy); if (hit && hit.closest('.calc, .graph')) return;
+    // empty canvas: pending linked value; the next operator continues the equation from it
+    const wr = world.getBoundingClientRect(), gw = ghost.offsetWidth;
+    finish(); colorOf(src); newCalc(gx - wr.left - gw / 2 - 11, gy - wr.top - 24, [{ t: 'ref', id: src }]); openPad();
   }
   world.addEventListener('pointerdown', e => {
     lastDone = null;
@@ -309,10 +343,7 @@
     const p = P; if (!p || e.pointerId !== p.pid) return; P = null; clearTimeout(p.timer);
     if (p.long) return;
     if (p.mode === 'link') {
-      svg.style.display = 'none'; const tgt = dropTarget(e.clientX, e.clientY, p.res); setDrop(null);
-      if (tgt && tgt.classList.contains('tok')) E.link(state.calcs, p.res, +tgt.closest('.calc').dataset.id, +tgt.dataset.i);
-      else if (tgt) { const g = getG(+tgt.dataset.g); addSeries(g, p.res); vals = E.evaluateAll(state.calcs); fitGraph(g); }
-      return render();
+      endLink(); dropLink(p.res, e.clientX, e.clientY - GHOST_DY); return render();
     }
     if (p.mode) { if (p.el) p.el.classList.remove('dragging'); return save(); }
     if (p.g != null) return;
@@ -323,7 +354,7 @@
   });
   world.addEventListener('touchmove', e => { if (P && P.el) e.preventDefault(); }, { passive: false });
   world.addEventListener('touchstart', e => { if (e.target.closest('.calc, .graph') && !e.target.closest('.slider, button')) e.preventDefault(); }, { passive: false });
-  world.addEventListener('pointercancel', () => { if (P) { clearTimeout(P.timer); if (P.el) P.el.classList.remove('dragging'); } P = null; svg.style.display = 'none'; setDrop(null); });
+  world.addEventListener('pointercancel', () => { if (P) { clearTimeout(P.timer); if (P.el) P.el.classList.remove('dragging'); } P = null; endLink(); });
   world.addEventListener('click', e => {
     const b = e.target.closest('[data-z]'); if (!b) return; const g = getG(+b.closest('.graph').dataset.g);
     const z = b.dataset.z === 'in' ? 1.5 : b.dataset.z === 'out' ? 1 / 1.5 : 0; if (z) { g.s *= z; g.ys = (g.ys || g.s / z) * z; } else fitGraph(g);
@@ -336,7 +367,19 @@
     t.v = E.numStr(+s.value); sliding = true; render(); sliding = false;
   });
 
-  pad.addEventListener('click', e => { const b = e.target.closest('button'); if (b) press(b.dataset.k); });
+  const backBtn = pad.querySelector('[data-k="back"]'); let armed = false, armT = null, bs = null, swallow = false;
+  function arm() { armed = true; backBtn.classList.add('armed'); clearTimeout(armT); armT = setTimeout(disarm, 3000); }
+  function disarm() { armed = false; backBtn.classList.remove('armed'); clearTimeout(armT); }
+  backBtn.addEventListener('pointerdown', e => { swallow = false; bs = { x: e.clientX, y: e.clientY }; try { backBtn.setPointerCapture(e.pointerId); } catch (err) {} });
+  backBtn.addEventListener('pointermove', e => { if (!bs) return; const dx = Math.abs(e.clientX - bs.x), dy = Math.abs(e.clientY - bs.y); if (dx > 24 && dx > dy) { bs = null; swallow = true; arm(); } });
+  backBtn.addEventListener('pointerup', () => { bs = null; });
+  document.addEventListener('pointerdown', e => { if (armed && !backBtn.contains(e.target)) disarm(); }, true);
+  function clearAll() { state.calcs = []; state.graphs = []; state.colors = {}; state.nextColor = 0; state.lastId = null; cur = null; lastDone = null; render(); }
+  pad.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b === backBtn) { if (swallow) { swallow = false; return; } if (armed) { disarm(); return clearAll(); } }
+    press(b.dataset.k);
+  });
   fab.addEventListener('click', () => { state.padOpen = true; render(); });
   document.addEventListener('keydown', e => {
     const m = { Enter: '=', Backspace: 'back', Escape: '=', x: '*', X: '*', Delete: 'C' }; const k = m[e.key] || e.key;

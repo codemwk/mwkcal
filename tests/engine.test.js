@@ -58,4 +58,5 @@ const pc={id:3,tokens:[n(2),o('^'),n(2),o('+'),ref(1)]};const pv=new Map([[1,{va
 const f=E.plotFn(pc,0,pv);eq('plot f(3)',f(3),10);eq('plot f(-2)',f(-2),5);
 const g=E.plotFn({id:4,tokens:[n(1),o('/'),n(5)]},2,pv);if(isNaN(g(0)))pass++;else{fail++;console.log('FAIL plot div0 NaN')}
 eq('plot tiny x',E.plotFn({id:5,tokens:[n(1),o('*'),n(1)]},2,pv)(1e-7),1e-7);
+for (const [v,e] of [[1019,'1,019'],[1042/1065,'0.9784'],[10/3,'3.3333'],[0.00123456,'0.001235'],[-1234.5,'-1,234.5'],[1e20,'1e+20'],[2.5e-8,'2.5e-8'],[0,'0']]) { if (E.format(v)===e) pass++; else { fail++; console.log('FAIL format',v,E.format(v),'!=',e); } }
 console.log(`${pass} passed, ${fail} failed`);process.exit(fail?1:0);

@@ -86,8 +86,9 @@
     if (v === null || v === undefined) return '';
     if (Object.is(v, -0)) v = 0;
     const a = Math.abs(v);
-    if (a !== 0 && (a >= 1e15 || a < 1e-9)) return v.toExponential(6).replace(/\.?0+e/, 'e');
-    let s = parseFloat(v.toPrecision(12)).toString();
+    if (a !== 0 && (a >= 1e15 || a < 1e-6)) return v.toExponential(3).replace(/\.?0+e/, 'e');
+    // Tydlig style: max 4 decimals; below 1, 4 significant digits (1042/1065 → 0.9784)
+    let s = parseFloat(a < 1 ? v.toPrecision(4) : v.toFixed(4)).toString();
     const [ip, fp] = s.split('.');
     return ip.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (fp ? '.' + fp : '');
   }
