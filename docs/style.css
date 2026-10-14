@@ -79,3 +79,6 @@ button[data-k=back]{touch-action:none}
  #pad .keys button{height:50px}
 }
 @media (max-height:640px){#pad .keys button{height:38px;font-size:20px}#pad .keys.extra button{height:30px}}
+
+#pad,#pad button,#padFab{touch-action:none}
+#pad button.down{filter:brightness(.82)}

@@ -218,6 +218,36 @@ let fails = 0; const ok = (c, m) => { console.log((c ? '  ok  ' : '  FAIL ') + m
     await p.screenshot({ path: `screens/pinch-${name}-reloaded.png` });
     await ctx.close();
   }
+
+  // ---- rapid keypad taps: 40ms single taps + overlapping two-thumb taps ----
+  for (const [w, h, name] of [[412, 915, 'folded'], [884, 1104, 'unfolded']]) {
+    console.log(name + ' (rapid taps)');
+    const ctx = await b.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+    const p = await ctx.newPage(); p.on('console', m => m.type() === 'error' && errs.push(m.text())); p.on('pageerror', e => errs.push(e.message));
+    await p.goto(URL); const cdp = await ctx.newCDPSession(p);
+    const T = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts });
+    const key = {}; for (const d of '0123456789') key[d] = await center(p, `#pad button[data-k="${d}"]`);
+    const num = () => p.evaluate(() => { const c = JSON.parse(localStorage['mwkcal-v2']).calcs; return c.length ? c[c.length - 1].tokens.map(t => t.v || t.t).join('') : ''; });
+    // 32 single taps, 40ms apart (20ms down, 20ms gap)
+    const seq = '12345678909876543210135792468024'; 
+    for (const d of seq) { const [x, y] = key[d]; await T('touchStart', [{ x, y, id: 1 }]); await p.waitForTimeout(20); await T('touchEnd', []); await p.waitForTimeout(20); }
+    await p.waitForTimeout(100); let got = await num(); ok(got === seq, `32 rapid taps @40ms all registered (${got.length}/32)`);
+    await p.click('#pad button[data-k="="]');
+    // 16 overlapping pairs: thumb A down, thumb B down while A still held, A up, B up
+    let exp = '';
+    for (let i = 0; i < 16; i++) {
+      const a = String(i % 9 + 1), bb = String((i * 3 + 1) % 10); exp += a + bb; const [ax, ay] = key[a], [bx, by] = key[bb];
+      await T('touchStart', [{ x: ax, y: ay, id: 1 }]); await p.waitForTimeout(15);
+      await T('touchStart', [{ x: ax, y: ay, id: 1 }, { x: bx, y: by, id: 2 }]); await p.waitForTimeout(15);
+      await T('touchEnd', [{ x: bx, y: by, id: 2 }]); await p.waitForTimeout(10); await T('touchEnd', []); await p.waitForTimeout(10);
+    }
+    await p.waitForTimeout(100); got = await num(); ok(got === exp, `16 overlapping two-thumb pairs → 32 digits registered (${got.length}/32)`);
+    // backspace still: tap deletes one, swipe arms
+    const [bx0, by0] = await center(p, '#pad button[data-k="back"]');
+    await T('touchStart', [{ x: bx0, y: by0, id: 1 }]); await p.waitForTimeout(20); await T('touchEnd', []); await p.waitForTimeout(60);
+    ok((await num()) === exp.slice(0, -1), 'backspace tap still deletes one char');
+    await ctx.close();
+  }
   ok(!errs.length, 'console errors: ' + (errs.join(' / ') || 'none'));
   await b.close(); console.log(fails ? `${fails} FAILED` : 'ALL PASSED'); process.exit(fails ? 1 : 0);
 })();

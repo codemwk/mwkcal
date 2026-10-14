@@ -422,12 +422,17 @@
   function backTap() { if (armed) { disarm(); return clearAll(); } press('back'); }
   document.addEventListener('pointerdown', e => { if (armed && !backBtn.contains(e.target)) disarm(); }, true);
   function clearAll() { state.calcs = []; state.graphs = []; state.colors = {}; state.nextColor = 0; state.lastId = null; cur = null; lastDone = null; render(); }
-  pad.addEventListener('click', e => {
-    const b = e.target.closest('button'); if (!b) return;
-    if (b === backBtn) { if (e.detail === 0) backTap(); return; } // pointer taps handled on pointerup (Chrome may skip click after a swipe)
+  // keys fire on pointerdown (each pointer independently): Chrome drops `click` when another finger is down or the finger slides
+  pad.addEventListener('pointerdown', e => {
+    const b = e.target.closest('button'); if (!b || b === backBtn) return;
+    e.preventDefault(); b.classList.add('down'); setTimeout(() => b.classList.remove('down'), 110);
     press(b.dataset.k);
   });
-  fab.addEventListener('click', () => { state.padOpen = true; render(); });
+  pad.addEventListener('click', e => { // keyboard activation only (Enter/Space on a focused key)
+    const b = e.target.closest('button'); if (!b || e.detail !== 0) return;
+    if (b === backBtn) backTap(); else press(b.dataset.k);
+  });
+  fab.addEventListener('pointerdown', e => { e.preventDefault(); state.padOpen = true; render(); });
   document.addEventListener('keydown', e => {
     const m = { Enter: '=', Backspace: 'back', Escape: '=', x: '*', X: '*', Delete: 'C' }; const k = m[e.key] || e.key;
     if (/^[0-9.+\-*/^%()]$/.test(k) || ['=', 'back', 'C'].includes(k)) { e.preventDefault(); press(k); }
