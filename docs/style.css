@@ -3,8 +3,9 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-weight:300;overscroll-behavior:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 #app{display:flex;flex-direction:column;height:100dvh;position:relative}
-#canvas{flex:1;position:relative;overflow:auto;touch-action:pan-x pan-y;background-image:radial-gradient(var(--dot) 1.2px,transparent 1.2px);background-size:28px 28px;background-attachment:local}
-#world{position:relative;width:4000px;height:4000px}
+#canvas{flex:1;position:relative;overflow:auto;touch-action:none;background-image:radial-gradient(var(--dot) 1.2px,transparent 1.2px);background-size:28px 28px;background-attachment:local}
+#sizer{position:relative;width:4000px;height:4000px;overflow:hidden}
+#world{position:absolute;left:0;top:0;width:4000px;height:4000px;transform-origin:0 0}
 #hint{position:absolute;top:38%;left:0;right:0;text-align:center;color:var(--mut);pointer-events:none;font-size:16px;line-height:1.6}
 .calc{position:absolute;display:flex;flex-direction:column;align-items:flex-start;padding:4px 8px;border-radius:12px;white-space:nowrap;touch-action:none;font-size:30px;font-weight:200}
 .calc.active{background:color-mix(in srgb,var(--org) 7%,transparent)}
@@ -49,13 +50,7 @@ button[data-k=neg]{font-size:21px}
 #menu button{background:none;color:#fff;font-size:15px;font-weight:400;height:38px;padding:0 13px;border-right:1px solid #48484a}
 #menu button:last-child{border-right:0}
 #linkLayer{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;display:none;z-index:15}
-@media (min-aspect-ratio:3/4) and (min-width:700px){
- #app{flex-direction:row}
- #pad{width:360px;display:flex;flex-direction:column;justify-content:flex-end;background:var(--bg);border-left:1px solid var(--keyg)}
- #pad .keys{background:var(--line)}
- button{height:72px}
-}
-@media (max-height:640px){button{height:42px;font-size:21px}}
+
 
 .keys.extra{grid-template-columns:repeat(3,1fr);margin-bottom:1px}
 button[data-k=back] .clr{display:none}
@@ -71,3 +66,16 @@ button[data-k=back]{touch-action:none}
 #ghost{position:fixed;display:none;transform:translate(-50%,-50%);color:#fff;font-size:30px;font-weight:300;padding:0 8px;border-radius:9px;pointer-events:none;z-index:16;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.25)}
 #ghost.show{display:block}
 #linkLayer path{fill:none;stroke-width:2;stroke-linecap:round}
+
+/* keypad: always docked at the bottom, full width, compact (canvas gets everything above) */
+#pad .keys button{height:46px;font-size:23px}
+#pad .keys.extra button{height:36px;font-size:19px}
+@media (min-width:700px){
+ #pad{display:flex;gap:1px}
+ #pad.collapsed{display:none}
+ #pad .keys.extra{grid-template-columns:1fr;grid-auto-rows:1fr;width:22%;margin:0}
+ #pad .keys.extra button{height:auto}
+ #pad .keys:not(.extra){flex:1}
+ #pad .keys button{height:50px}
+}
+@media (max-height:640px){#pad .keys button{height:38px;font-size:20px}#pad .keys.extra button{height:30px}}

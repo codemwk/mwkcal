@@ -2,7 +2,7 @@
   'use strict';
   const E = window.TydligEngine, KEY = 'mwkcal-v2', OLD = 'tydlig-state-v1';
   const $ = s => document.querySelector(s);
-  const canvas = $('#canvas'), world = $('#world'), pad = $('#pad'), fab = $('#padFab'), hint = $('#hint');
+  const canvas = $('#canvas'), sizer = $('#sizer'), world = $('#world'), pad = $('#pad'), fab = $('#padFab'), hint = $('#hint');
   const menu = $('#menu'), svg = $('#linkLayer'), ghost = $('#ghost');
   const LINKC = ['#4cc08f', '#e8643c', '#6058f0', '#e0508a', '#2fb2d6', '#c99a1c'], GHOST_DY = 44;
   const PALETTE = ['#2f80ed', '#ff9500', '#27ae60', '#eb5757', '#9b51e0', '#00a3a3'];
@@ -14,12 +14,20 @@
     for (const k of [KEY, OLD]) { try { const s = JSON.parse(localStorage.getItem(k)); if (s && Array.isArray(s.calcs)) return norm(s); } catch (e) {} }
     return norm({});
   }
-  function norm(s) { return { calcs: s.calcs || [], graphs: s.graphs || [], nextId: s.nextId || 1, padOpen: s.padOpen !== false, colors: s.colors || {}, nextColor: s.nextColor || 0, lastId: s.lastId == null ? null : s.lastId }; }
+  function norm(s) { return { calcs: s.calcs || [], graphs: s.graphs || [], nextId: s.nextId || 1, padOpen: s.padOpen !== false, colors: s.colors || {}, nextColor: s.nextColor || 0, lastId: s.lastId == null ? null : s.lastId, zoom: s.zoom || 1, sx: s.sx || 0, sy: s.sy || 0 }; }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
   const get = id => state.calcs.find(c => c.id === id);
   // each linked source result gets the next link color in sequence (green, red-orange, indigo, ...)
   const peekColor = id => LINKC[(state.colors[id] != null ? state.colors[id] : state.nextColor) % LINKC.length];
   function colorOf(id) { if (state.colors[id] == null) state.colors[id] = state.nextColor++; return LINKC[state.colors[id] % LINKC.length]; }
+  // ---- zoom: world is scaled with a CSS transform; sizer gives the scroll area its scaled size ----
+  const ZMIN = 0.4, ZMAX = 3, WORLD = 4000; let Z = 1;
+  function setZoom(z) {
+    Z = Math.min(ZMAX, Math.max(ZMIN, z)); state.zoom = Z;
+    world.style.transform = `scale(${Z})`; sizer.style.width = sizer.style.height = WORLD * Z + 'px';
+    canvas.style.backgroundSize = `${28 * Z}px ${28 * Z}px`; ghost.style.fontSize = 30 * Z + 'px';
+  }
+  function toWorld(cx, cy) { const r = world.getBoundingClientRect(); return [(cx - r.left) / Z, (cy - r.top) / Z]; }
   const getG = id => state.graphs.find(g => g.id === id);
   const esc = s => String(s).replace(/[&<>"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
   function fmtNum(s) { const neg = s[0] === '-'; if (neg) s = s.slice(1); const [a, b] = s.split('.'); return (neg ? '−' : '') + a.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (b !== undefined ? '.' + b : ''); }
@@ -150,7 +158,7 @@
     g.cx = (xa + xb) / 2; g.cy = (ya + yb) / 2; g.s = g.w / (xb - xa); g.ys = g.h / (yb - ya);
   }
   function newGraph(x, y) {
-    const w = Math.round(Math.min(360, canvas.clientWidth - 32));
+    const w = Math.round(Math.min(360, canvas.clientWidth / Z - 32));
     const g = { id: state.nextId++, x: Math.max(4, Math.round(x)), y: Math.max(4, Math.round(y)), w, h: Math.round(w * 0.72), cx: 0, cy: 0, s: 20, series: [] };
     state.graphs.push(g); return g;
   }
@@ -178,7 +186,7 @@
     if (cur && cur.id === id) cur = null;
   }
   function freeSpot() { // below the lowest item visible in the viewport
-    const vx = canvas.scrollLeft, vy = canvas.scrollTop, vw = canvas.clientWidth, vh = canvas.clientHeight;
+    const vx = canvas.scrollLeft / Z, vy = canvas.scrollTop / Z, vw = canvas.clientWidth / Z, vh = canvas.clientHeight / Z;
     let x = vx + 20, best = -1;
     const items = state.calcs.map(c => [c.x, c.y, els.get(c.id)]).concat(state.graphs.map(g => [g.x, g.y, gels.get(g.id)]));
     for (const [ix, iy, el] of items) {
@@ -186,7 +194,7 @@
       if (iy + h > vy && iy < vy + vh && ix < vx + vw && ix + w > vx && iy + h > best) { best = iy + h; x = Math.max(vx + 8, ix); }
     }
     const y = best >= 0 ? best + 18 : vy + 20;
-    if (y + 60 > vy + vh) canvas.scrollTop = y - vh / 3;
+    if (y + 60 > vy + vh) canvas.scrollTop = (y - vh / 3) * Z;
     return { x, y };
   }
   function openPad() { if (!state.padOpen) state.padOpen = true; }
@@ -252,7 +260,7 @@
     } else if (p.g != null) {
       items.push(['Delete', () => { state.graphs = state.graphs.filter(g => g.id !== p.g); state.calcs.forEach(cc => cc.tokens.forEach(tt => { if (tt.graphVar === p.g) delete tt.graphVar; })); }]);
     } else {
-      const r = world.getBoundingClientRect(), wx = x - r.left, wy = y - r.top;
+      const [wx, wy] = toWorld(x, y);
       if (clip != null) items.push(['Paste', () => { finish(); newCalc(wx - 10, wy - 20, [{ t: 'num', v: E.numStr(clip) }]); }]);
       items.push(['Graph', () => { finish(); newGraph(wx - 20, wy - 20); }]);
     }
@@ -307,8 +315,8 @@
     if (tgt) { const g = getG(+tgt.dataset.g); addSeries(g, src); vals = E.evaluateAll(state.calcs); fitGraph(g); return; }
     const hit = document.elementFromPoint(gx, gy); if (hit && hit.closest('.calc, .graph')) return;
     // empty canvas: pending linked value; the next operator continues the equation from it
-    const wr = world.getBoundingClientRect(), gw = ghost.offsetWidth;
-    finish(); colorOf(src); newCalc(gx - wr.left - gw / 2 - 11, gy - wr.top - 24, [{ t: 'ref', id: src }]); openPad();
+    const [wx, wy] = toWorld(gx, gy), gw = ghost.offsetWidth / Z;
+    finish(); colorOf(src); newCalc(wx - gw / 2 - 11, wy - 24, [{ t: 'ref', id: src }]); openPad();
   }
   world.addEventListener('pointerdown', e => {
     lastDone = null;
@@ -330,14 +338,15 @@
       if (p.long && p.calcId == null && p.g == null) return; // empty-canvas menu stays
       p.moved = true; p.long = false; hideMenu(); clearTimeout(p.timer);
       p.mode = p.res != null ? 'link' : p.calcId != null ? 'move' : p.g != null ? (p.onBar ? 'gmove' : 'gpan') : 'scroll';
-      if (p.mode === 'scroll') return;
+      if (p.mode === 'scroll') { p.sl = canvas.scrollLeft; p.st = canvas.scrollTop; return; }
       try { p.el.setPointerCapture(e.pointerId); } catch (err) {}
       if (p.mode === 'move') p.el.classList.add('dragging');
     }
-    if (p.mode === 'link') drawLink(p, e.clientX, e.clientY);
-    else if (p.mode === 'move') { const c = get(p.calcId); c.x = Math.max(0, p.ox + dx); c.y = Math.max(0, p.oy + dy); p.el.style.left = c.x + 'px'; p.el.style.top = c.y + 'px'; }
-    else if (p.mode === 'gmove') { const g = getG(p.g); g.x = Math.max(0, p.ox + dx); g.y = Math.max(0, p.oy + dy); p.el.style.left = g.x + 'px'; p.el.style.top = g.y + 'px'; }
-    else if (p.mode === 'gpan') { const g = getG(p.g); g.cx = p.gcx - dx / g.s; g.cy = p.gcy + dy / (g.ys || g.s); drawGraph(g, p.el); }
+    if (p.mode === 'scroll') { canvas.scrollLeft = p.sl - dx; canvas.scrollTop = p.st - dy; }
+    else if (p.mode === 'link') drawLink(p, e.clientX, e.clientY);
+    else if (p.mode === 'move') { const c = get(p.calcId); c.x = Math.max(0, p.ox + dx / Z); c.y = Math.max(0, p.oy + dy / Z); p.el.style.left = c.x + 'px'; p.el.style.top = c.y + 'px'; }
+    else if (p.mode === 'gmove') { const g = getG(p.g); g.x = Math.max(0, p.ox + dx / Z); g.y = Math.max(0, p.oy + dy / Z); p.el.style.left = g.x + 'px'; p.el.style.top = g.y + 'px'; }
+    else if (p.mode === 'gpan') { const g = getG(p.g); g.cx = p.gcx - dx / Z / g.s; g.cy = p.gcy + dy / Z / (g.ys || g.s); drawGraph(g, p.el); }
   });
   world.addEventListener('pointerup', e => {
     const p = P; if (!p || e.pointerId !== p.pid) return; P = null; clearTimeout(p.timer);
@@ -349,9 +358,45 @@
     if (p.g != null) return;
     if (p.res != null && !(cur && cur.id === p.res)) return insertRef(p.res);
     if (p.calcId != null) return select(p.calcId, p.tok);
-    const r = world.getBoundingClientRect();
-    finish(); newCalc(e.clientX - r.left - 10, e.clientY - r.top - 22); openPad(); render();
+    const [wx, wy] = toWorld(e.clientX, e.clientY);
+    finish(); newCalc(wx - 10, wy - 22); openPad(); render();
   });
+  // ---- two-finger pinch zoom + pan about the midpoint ----
+  const touches = new Map(); let pinch = null;
+  const two = () => { const [a, b] = [...touches.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; };
+  function abortItemGesture() {
+    const p = P; P = null; if (!p) return; clearTimeout(p.timer); hideMenu(); endLink();
+    if (p.mode === 'move') { const c = get(p.calcId); if (c) { c.x = p.ox; c.y = p.oy; } }
+    if (p.mode === 'gmove') { const g = getG(p.g); if (g) { g.x = p.ox; g.y = p.oy; } }
+    if (p.el) p.el.classList.remove('dragging'); render();
+  }
+  canvas.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch') return;
+    if (e.isPrimary) { touches.clear(); pinch = null; }
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) {
+      abortItemGesture(); const t = two(), cr = canvas.getBoundingClientRect();
+      pinch = { d0: t.d, z0: Z, wx: (canvas.scrollLeft + t.mx - cr.left) / Z, wy: (canvas.scrollTop + t.my - cr.top) / Z };
+    }
+    if (touches.size >= 2) e.stopPropagation();
+  }, true);
+  canvas.addEventListener('pointermove', e => {
+    if (!touches.has(e.pointerId)) return; touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!pinch || touches.size < 2) return; e.stopPropagation();
+    const t = two(), cr = canvas.getBoundingClientRect(); setZoom(pinch.z0 * t.d / pinch.d0);
+    canvas.scrollLeft = pinch.wx * Z - (t.mx - cr.left); canvas.scrollTop = pinch.wy * Z - (t.my - cr.top);
+  }, true);
+  const lift = e => { if (!touches.delete(e.pointerId)) return; if (pinch) { e.stopPropagation(); if (touches.size < 2) { pinch = null; saveView(); } } };
+  window.addEventListener('pointerup', lift, true); window.addEventListener('pointercancel', lift, true);
+  // trackpad pinch / ctrl+wheel zoom about the cursor
+  canvas.addEventListener('wheel', e => {
+    if (!e.ctrlKey || e.defaultPrevented) return; e.preventDefault(); const cr = canvas.getBoundingClientRect(), mx = e.clientX - cr.left, my = e.clientY - cr.top;
+    const wx = (canvas.scrollLeft + mx) / Z, wy = (canvas.scrollTop + my) / Z; setZoom(Z * Math.exp(-e.deltaY * 0.01));
+    canvas.scrollLeft = wx * Z - mx; canvas.scrollTop = wy * Z - my; saveView();
+  }, { passive: false });
+  let viewT = null; function saveView() { clearTimeout(viewT); viewT = setTimeout(() => { state.sx = canvas.scrollLeft; state.sy = canvas.scrollTop; save(); }, 150); }
+  canvas.addEventListener('scroll', saveView, { passive: true });
+  canvas.addEventListener('touchmove', e => { if (!e.target.closest('.slider')) e.preventDefault(); }, { passive: false });
   world.addEventListener('touchmove', e => { if (P && P.el) e.preventDefault(); }, { passive: false });
   world.addEventListener('touchstart', e => { if (e.target.closest('.calc, .graph') && !e.target.closest('.slider, button')) e.preventDefault(); }, { passive: false });
   world.addEventListener('pointercancel', () => { if (P) { clearTimeout(P.timer); if (P.el) P.el.classList.remove('dragging'); } P = null; endLink(); });
@@ -367,17 +412,19 @@
     t.v = E.numStr(+s.value); sliding = true; render(); sliding = false;
   });
 
-  const backBtn = pad.querySelector('[data-k="back"]'); let armed = false, armT = null, bs = null, swallow = false;
+  const backBtn = pad.querySelector('[data-k="back"]'); let armed = false, armT = null, bs = null, swallow = false, upT = 0;
   function arm() { armed = true; backBtn.classList.add('armed'); clearTimeout(armT); armT = setTimeout(disarm, 3000); }
   function disarm() { armed = false; backBtn.classList.remove('armed'); clearTimeout(armT); }
   backBtn.addEventListener('pointerdown', e => { swallow = false; bs = { x: e.clientX, y: e.clientY }; try { backBtn.setPointerCapture(e.pointerId); } catch (err) {} });
   backBtn.addEventListener('pointermove', e => { if (!bs) return; const dx = Math.abs(e.clientX - bs.x), dy = Math.abs(e.clientY - bs.y); if (dx > 24 && dx > dy) { bs = null; swallow = true; arm(); } });
-  backBtn.addEventListener('pointerup', () => { bs = null; });
+  backBtn.addEventListener('pointerup', () => { const tapped = !!bs; bs = null; if (tapped) backTap(); });
+  backBtn.addEventListener('pointercancel', () => { bs = null; });
+  function backTap() { if (armed) { disarm(); return clearAll(); } press('back'); }
   document.addEventListener('pointerdown', e => { if (armed && !backBtn.contains(e.target)) disarm(); }, true);
   function clearAll() { state.calcs = []; state.graphs = []; state.colors = {}; state.nextColor = 0; state.lastId = null; cur = null; lastDone = null; render(); }
   pad.addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
-    if (b === backBtn) { if (swallow) { swallow = false; return; } if (armed) { disarm(); return clearAll(); } }
+    if (b === backBtn) { if (e.detail === 0) backTap(); return; } // pointer taps handled on pointerup (Chrome may skip click after a swipe)
     press(b.dataset.k);
   });
   fab.addEventListener('click', () => { state.padOpen = true; render(); });
@@ -386,6 +433,6 @@
     if (/^[0-9.+\-*/^%()]$/.test(k) || ['=', 'back', 'C'].includes(k)) { e.preventDefault(); press(k); }
   });
 
-  render();
+  setZoom(state.zoom); render(); canvas.scrollLeft = state.sx; canvas.scrollTop = state.sy;
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

@@ -157,8 +157,65 @@ let fails = 0; const ok = (c, m) => { console.log((c ? '  ok  ' : '  FAIL ') + m
     ok((await css('button[data-k="back"]', 'backgroundColor')) === 'rgb(232, 68, 58)', 'armed key is solid red');
     await p.screenshot({ path: `screens/video-${name}-armed.png` });
     await k('7'); ok(await p.locator('button[data-k="back"].armed').count() === 0, 'tapping elsewhere disarms');
-    await drag(bb.x + 10, by, bb.x + bb.width - 10, by); await k(['back']); await p.waitForTimeout(100);
-    ok(await p.locator('.calc').count() === 0 && await p.locator('button[data-k="back"].armed').count() === 0, 'tap armed ⌫ clears entire canvas');
+    await drag(bb.x + 10, by, bb.x + bb.width - 10, by); const dbg = [await p.locator('button[data-k="back"].armed').count(), await p.locator('.calc').count()]; await k(['back']); await p.waitForTimeout(100);
+    ok(await p.locator('.calc').count() === 0 && await p.locator('button[data-k="back"].armed').count() === 0, 'tap armed ⌫ clears entire canvas ' + dbg + ' → ' + (await p.locator('.calc').count()));
+    await ctx.close();
+  }
+
+  // ---- two-finger pinch zoom / pan (CDP multi-touch) ----
+  for (const [w, h, name] of [[412, 915, 'folded'], [884, 1104, 'unfolded']]) {
+    console.log(name + ' (pinch)');
+    const ctx = await b.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+    const p = await ctx.newPage(); p.on('console', m => m.type() === 'error' && errs.push(m.text())); p.on('pageerror', e => errs.push(e.message));
+    await p.goto(URL); const cdp = await ctx.newCDPSession(p);
+    const T = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((q, i) => ({ x: q[0], y: q[1], id: i })) });
+    const tap = async (x, y) => { await T('touchStart', [[x, y]]); await p.waitForTimeout(40); await T('touchEnd', []); await p.waitForTimeout(40); };
+    const k = async s => { for (const c of (Array.isArray(s) ? s : [...s])) { const [x, y] = await center(p, `#pad button[data-k="${c}"]`); await tap(x, y); } };
+    const drag1 = async (x1, y1, x2, y2) => { await T('touchStart', [[x1, y1]]); for (let i = 1; i <= 12; i++) { await T('touchMove', [[x1 + (x2 - x1) * i / 12, y1 + (y2 - y1) * i / 12]]); await p.waitForTimeout(16); } await T('touchEnd', []); await p.waitForTimeout(60); };
+    const pinch = async (cx, cy, d0, d1, pan = [0, 0]) => {
+      await T('touchStart', [[cx - d0 / 2, cy], [cx + d0 / 2, cy]]);
+      for (let i = 1; i <= 15; i++) { const d = d0 + (d1 - d0) * i / 15, ox = pan[0] * i / 15, oy = pan[1] * i / 15; await T('touchMove', [[cx - d / 2 + ox, cy + oy], [cx + d / 2 + ox, cy + oy]]); await p.waitForTimeout(16); }
+      await T('touchEnd', []); await p.waitForTimeout(250); };
+    const res = id => p.textContent(`[data-res="${id}"]`);
+    const zoom = () => p.evaluate(() => JSON.parse(localStorage['mwkcal-v2']).zoom);
+    const cv = await p.locator('#canvas').boundingBox();
+    await k('12+3='); await k('7*2=');
+    // pinch about a point: world point under the midpoint stays put
+    const c2b = await p.locator('.calc[data-id="2"]').boundingBox(); const mid = [c2b.x + 60, c2b.y + 10];
+    const before = await p.evaluate(([x, y]) => { const r = document.getElementById('world').getBoundingClientRect(), z = parseFloat(getComputedStyle(document.getElementById('world')).transform.split(',')[3]) || 1; return [(x - r.left) / z, (y - r.top) / z]; }, mid);
+    await pinch(mid[0], mid[1], 100, 200); const z1 = await zoom(); ok(z1 > 1.8 && z1 < 2.2, `pinch out → zoom ${z1.toFixed(2)} (~2x)`);
+    const after = await p.evaluate(([x, y]) => { const r = document.getElementById('world').getBoundingClientRect(), z = JSON.parse(localStorage['mwkcal-v2']).zoom; return [(x - r.left) / z, (y - r.top) / z]; }, mid);
+    ok(Math.abs(after[0] - before[0]) < 3 && Math.abs(after[1] - before[1]) < 3, `zoom anchored at pinch midpoint (Δ ${(after[0] - before[0]).toFixed(1)}, ${(after[1] - before[1]).toFixed(1)})`);
+    ok(await p.evaluate(() => window.visualViewport.scale) === 1, 'no browser page zoom');
+    await p.screenshot({ path: `screens/pinch-${name}-zoomed.png` });
+    // drag-link still lands correctly at 2x: drop 15 onto the "2" of 7×2
+    let rb = await p.locator('[data-res="1"]').boundingBox(), tb = await p.locator('.calc[data-id="2"] .tok[data-i="2"]').boundingBox();
+    await drag1(rb.x + rb.width / 2, rb.y + rb.height / 2, tb.x + tb.width / 2, tb.y + tb.height / 2 + G);
+    ok((await res(2)) === '105', 'drag-link at 2x replaces 2 with 15 → 105');
+    // move a calc at 2x: world delta = finger delta / zoom
+    const p0 = await p.evaluate(() => JSON.parse(localStorage['mwkcal-v2']).calcs[1]);
+    const eb = await p.locator('.calc[data-id="2"] .op').first().boundingBox();
+    await drag1(eb.x + eb.width / 2, eb.y + eb.height / 2, eb.x + eb.width / 2 + 80, eb.y + eb.height / 2 + 40);
+    const p1 = await p.evaluate(() => JSON.parse(localStorage['mwkcal-v2']).calcs[1]); const zz = await zoom();
+    ok(Math.abs((p1.x - p0.x) - 80 / zz) < 2 && Math.abs((p1.y - p0.y) - 40 / zz) < 2, `item drag scaled by zoom (${(p1.x - p0.x).toFixed(1)}, ${(p1.y - p0.y).toFixed(1)})`);
+    // tap empty at zoom creates calc at the tapped world spot
+    await tap(cv.x + 40, cv.y + cv.height - 60); await k('9='); const nb = await p.locator('.calc').last().boundingBox();
+    ok(Math.abs(nb.y + nb.height / 2 - (cv.y + cv.height - 60)) < 30 * zz, 'tap-empty at zoom places calc under finger');
+    // two-finger pan (no zoom change) and pinch-in clamped at 0.4
+    const s0 = await p.evaluate(() => [canvas.scrollLeft, canvas.scrollTop]);
+    await pinch(cv.x + cv.width / 2, cv.y + 200, 120, 120, [-60, -80]); const s1 = await p.evaluate(() => [canvas.scrollLeft, canvas.scrollTop]);
+    ok(Math.abs(s1[0] - s0[0] - 60) < 4 && Math.abs(s1[1] - s0[1] - 80) < 4, `two-finger pan scrolls (${s1[0] - s0[0]}, ${s1[1] - s0[1]})`);
+    await pinch(cv.x + cv.width / 2, cv.y + 200, 300, 20); ok(Math.abs((await zoom()) - 0.4) < 0.01, 'pinch-in clamps at 0.4x');
+    await pinch(cv.x + cv.width / 2, cv.y + 200, 20, 300); await pinch(cv.x + cv.width / 2, cv.y + 200, 20, 300); ok(Math.abs((await zoom()) - 3) < 0.01, 'pinch-out clamps at 3x');
+    await pinch(cv.x + cv.width / 2, cv.y + 200, 300, 120);
+    // one-finger pan on empty canvas
+    const s2 = await p.evaluate(() => [canvas.scrollLeft, canvas.scrollTop]); await drag1(cv.x + cv.width - 30, cv.y + cv.height - 30, cv.x + cv.width - 130, cv.y + cv.height - 130);
+    const s3 = await p.evaluate(() => [canvas.scrollLeft, canvas.scrollTop]); ok(s3[0] - s2[0] === 100 && s3[1] - s2[1] === 100, 'one-finger pan on empty canvas');
+    // persistence
+    const zs = await zoom(); await p.waitForTimeout(300); await p.reload(); await p.waitForTimeout(200);
+    const [zr, s4] = await p.evaluate(() => [JSON.parse(localStorage['mwkcal-v2']).zoom, [canvas.scrollLeft, canvas.scrollTop], getComputedStyle(document.getElementById('world')).transform]);
+    ok(Math.abs(zr - zs) < 1e-6 && Math.abs(s4[0] - s3[0]) < 2 && Math.abs(s4[1] - s3[1]) < 2, `zoom ${zr.toFixed(2)} + scroll persist after reload`);
+    await p.screenshot({ path: `screens/pinch-${name}-reloaded.png` });
     await ctx.close();
   }
   ok(!errs.length, 'console errors: ' + (errs.join(' / ') || 'none'));
