@@ -11,6 +11,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:
 .calc.dragging{opacity:.7}
 .row{display:flex;align-items:baseline;gap:.25em}
 .expr{font-variant-numeric:tabular-nums;display:flex;align-items:baseline}
+.calc,.calc *,.res,.tok,.graph,.graph canvas{touch-action:none}
 .tok{border-radius:9px;padding:0 3px;transition:background .12s}
 .tok.ref{color:var(--lblue);font-weight:300}
 .tok.gvar{color:var(--pur);font-weight:400}

@@ -6,7 +6,7 @@
   const menu = $('#menu'), svg = $('#linkLayer'), linkPath = $('#linkPath');
   const PALETTE = ['#2f80ed', '#ff9500', '#27ae60', '#eb5757', '#9b51e0', '#00a3a3'];
   const OPS = { '+': '+', '-': '−', '*': '×', '/': '÷', '^': '^' };
-  let state = load(), cur = null, vals = new Map(), lastVals = new Map(), clip = null, sliding = false;
+  let state = load(), cur = null, lastDone = null, vals = new Map(), lastVals = new Map(), clip = null, sliding = false;
   const els = new Map(), gels = new Map();
 
   function load() {
@@ -186,8 +186,16 @@
   function press(k) {
     hideMenu();
     if (k === 'collapse') { state.padOpen = false; return render(); }
-    if (k === '=') { finish(); return render(); }
-    if (!cur) { if (['back', 'C', ')'].includes(k)) return; const p = freeSpot(); newCalc(p.x, p.y); }
+    if (k === '=') { const id = cur && cur.id; finish(); lastDone = id && get(id) ? id : null; return render(); }
+    if (!cur) {
+      if (['back', 'C', ')'].includes(k)) return;
+      const prev = lastDone != null && get(lastDone); lastDone = null;
+      if (prev) { // Tydlig chaining: new line directly below the finished calc
+        const el = els.get(prev.id), x = prev.x, y = prev.y + (el ? el.offsetHeight : 44) + 10, r = vals.get(prev.id);
+        if (/^[+\-*/^%]$/.test(k) && r && r.value != null) { newCalc(x, y, [{ t: 'ref', id: prev.id }, k === '%' ? { t: '%' } : { t: 'op', v: k }]); return render(); }
+        newCalc(x, y);
+      } else { const p = freeSpot(); newCalc(p.x, p.y); }
+    }
     const c = get(cur.id); if (!c) { cur = null; return; }
     E.applyKey(c, cur, k); render();
   }
@@ -269,6 +277,7 @@
     svg.style.display = 'block'; setDrop(dropTarget(x, y, p.res));
   }
   world.addEventListener('pointerdown', e => {
+    lastDone = null;
     if (e.button > 0 || e.target.closest('.slider, button')) return;
     const cEl = e.target.closest('.calc'), gEl = e.target.closest('.graph'), resEl = e.target.closest('.res'), tokEl = e.target.closest('.tok');
     P = { sx: e.clientX, sy: e.clientY, pid: e.pointerId, moved: false, mode: null, long: false, el: cEl || gEl,
@@ -276,14 +285,16 @@
       tok: tokEl ? +tokEl.dataset.i : null, g: gEl ? +gEl.dataset.g : null, onBar: !!e.target.closest('.gbar') };
     if (P.calcId != null) { const c = get(P.calcId); P.ox = c.x; P.oy = c.y; }
     if (P.g != null) { const g = getG(P.g); P.ox = g.x; P.oy = g.y; P.gcx = g.cx; P.gcy = g.cy; }
+    if (P.el) { try { P.el.setPointerCapture(e.pointerId); } catch (err) {} }
     const p = P; p.timer = setTimeout(() => { if (P === p && !p.moved) { p.long = true; openMenu(p, p.sx, p.sy); } }, 500);
   });
   world.addEventListener('pointermove', e => {
-    const p = P; if (!p || e.pointerId !== p.pid || p.long) return;
+    const p = P; if (!p || e.pointerId !== p.pid) return;
     const dx = e.clientX - p.sx, dy = e.clientY - p.sy;
     if (!p.moved) {
-      if (Math.hypot(dx, dy) < 8) return;
-      p.moved = true; clearTimeout(p.timer);
+      if (Math.hypot(dx, dy) < 10) return;
+      if (p.long && p.calcId == null && p.g == null) return; // empty-canvas menu stays
+      p.moved = true; p.long = false; hideMenu(); clearTimeout(p.timer);
       p.mode = p.res != null ? 'link' : p.calcId != null ? 'move' : p.g != null ? (p.onBar ? 'gmove' : 'gpan') : 'scroll';
       if (p.mode === 'scroll') return;
       try { p.el.setPointerCapture(e.pointerId); } catch (err) {}
@@ -310,6 +321,8 @@
     const r = world.getBoundingClientRect();
     finish(); newCalc(e.clientX - r.left - 10, e.clientY - r.top - 22); openPad(); render();
   });
+  world.addEventListener('touchmove', e => { if (P && P.el) e.preventDefault(); }, { passive: false });
+  world.addEventListener('touchstart', e => { if (e.target.closest('.calc, .graph') && !e.target.closest('.slider, button')) e.preventDefault(); }, { passive: false });
   world.addEventListener('pointercancel', () => { if (P) { clearTimeout(P.timer); if (P.el) P.el.classList.remove('dragging'); } P = null; svg.style.display = 'none'; setDrop(null); });
   world.addEventListener('click', e => {
     const b = e.target.closest('[data-z]'); if (!b) return; const g = getG(+b.closest('.graph').dataset.g);
