@@ -32,4 +32,30 @@ const cyc=[{id:1,tokens:[ref(2)]},{id:2,tokens:[ref(1)]}];r=E.evaluateAll(cyc);i
 r=E.evaluateAll([{id:5,tokens:[ref(9),o('+'),n(1)]}]);if(r.get(5).error)pass++;else{fail++;console.log('FAIL missing ref')}
 r=E.evaluateAll([{id:1,tokens:[n(1),o('+')]},{id:2,tokens:[ref(1)]}]);if(r.get(2).error)pass++;else{fail++;console.log('FAIL err propagate')}
 if(E.format(1234567.5)==='1,234,567.5'&&E.format(0.1+0.2)==='0.3')pass++;else{fail++;console.log('FAIL format',E.format(0.1+0.2))}
+
+// ---- editing helpers ----
+function typ(c,cur,keys){for(const k of keys)E.applyKey(c,cur,k);return cur}
+function val(c){return ev(c.tokens)}
+let c={id:1,tokens:[]};typ(c,{tok:null},['1','2','+','3','%']);eq('type 12+3%',val(c),12.36);
+c={id:1,tokens:[]};typ(c,{tok:null},['2','^','1','0']);eq('type 2^10',val(c),1024);
+c={id:1,tokens:[]};typ(c,{tok:null},['5','neg','*','3']);eq('neg key',val(c),-15);
+c={id:1,tokens:[]};typ(c,{tok:null},['1','2','3','back','+','1','*','*','-','2']);eq('back+op replace+unary',val(c),12-2+0||10);
+// selected-number editing: replaces just that number, then appends
+c={id:1,tokens:[]};typ(c,{tok:null},['1','0','0','/','4']);let cur={tok:2,fresh:true};typ(c,cur,['5']);eq('tok replace',val(c),20);
+typ(c,cur,['0']);eq('tok append',val(c),2);typ(c,cur,['back']);eq('tok back',val(c),20);
+typ(c,cur,['neg']);eq('tok neg',val(c),-20);typ(c,cur,['C']);if(c.tokens[2].v==='0'&&cur.fresh)pass++;else{fail++;console.log('FAIL tok C')}
+typ(c,cur,['+','1']);if(cur.tok===null&&c.tokens.length===5)pass++;else{fail++;console.log('FAIL op leaves tok mode')}
+// link (drag-to-link) + cascade + cycle refusal
+const cs=[{id:1,tokens:[n(2),o('+'),n(3)]},{id:2,tokens:[n(100),o('/'),n(4)]}];
+if(E.link(cs,1,2,2))pass++;else{fail++;console.log('FAIL link')}
+r=E.evaluateAll(cs);eq('linked',r.get(2).value,20);cs[0].tokens[0].v='7';r=E.evaluateAll(cs);eq('cascade',r.get(2).value,10);
+if(!E.link(cs,2,1,0)&&!E.link(cs,1,1,0))pass++;else{fail++;console.log('FAIL cycle/self link allowed')}
+E.unlinkAll(cs,1,r);if(cs[1].tokens[2].t==='num'&&cs[1].tokens[2].v==='10')pass++;else{fail++;console.log('FAIL unlinkAll',cs[1].tokens[2])}
+// division by zero is an error (UI shows '?')
+r=E.evaluateAll([{id:1,tokens:[n(1),o('/'),n(0)]}]);if(r.get(1).error)pass++;else{fail++;console.log('FAIL div0')}
+// plotting: token 0 becomes x
+const pc={id:3,tokens:[n(2),o('^'),n(2),o('+'),ref(1)]};const pv=new Map([[1,{value:1}]]);
+const f=E.plotFn(pc,0,pv);eq('plot f(3)',f(3),10);eq('plot f(-2)',f(-2),5);
+const g=E.plotFn({id:4,tokens:[n(1),o('/'),n(5)]},2,pv);if(isNaN(g(0)))pass++;else{fail++;console.log('FAIL plot div0 NaN')}
+eq('plot tiny x',E.plotFn({id:5,tokens:[n(1),o('*'),n(1)]},2,pv)(1e-7),1e-7);
 console.log(`${pass} passed, ${fail} failed`);process.exit(fail?1:0);

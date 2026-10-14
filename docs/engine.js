@@ -92,6 +92,69 @@
     return ip.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (fp ? '.' + fp : '');
   }
 
-  const api = { evaluate, evaluateAll, dependsOn, format };
+
+  // ---------- editing helpers (pure, mutate calc tokens) ----------
+  const isValueEnd = t => !!t && (t.t === 'num' || t.t === 'ref' || t.t === ')' || t.t === '%');
+  // cur = {tok: index|null, fresh: bool}; tok!=null means a specific number token is selected
+  function applyKey(c, cur, k) {
+    const T = c.tokens;
+    if (cur.tok != null) {
+      const t = T[cur.tok];
+      if (!t) cur.tok = null;
+      else if (/^[0-9.]$/.test(k)) {
+        if (t.t !== 'num') { T[cur.tok] = { t: 'num', v: k === '.' ? '0.' : k }; cur.fresh = false; return cur; }
+        if (cur.fresh) { t.v = k === '.' ? '0.' : k; cur.fresh = false; return cur; }
+        if (k === '.' && t.v.includes('.')) return cur;
+        if ((t.v === '0' || t.v === '-0') && k !== '.') t.v = t.v.replace('0', k); else t.v += k;
+        return cur;
+      } else if (k === 'back') {
+        if (t.t === 'num') { const nv = t.v.slice(0, -1); if (nv === '' || nv === '-') { t.v = '0'; cur.fresh = true; } else { t.v = nv; cur.fresh = false; } }
+        else { T[cur.tok] = { t: 'num', v: '0' }; cur.fresh = true; }
+        return cur;
+      } else if (k === 'neg') { if (t.t === 'num') t.v = t.v[0] === '-' ? t.v.slice(1) : '-' + t.v; return cur; }
+      else if (k === 'C') { if (t.t === 'num') t.v = '0'; else T[cur.tok] = { t: 'num', v: '0' }; cur.fresh = true; return cur; }
+      else cur.tok = null; // operators etc. continue at the end of the expression
+    }
+    const last = T[T.length - 1];
+    if (/^[0-9.]$/.test(k)) {
+      if (last && last.t === 'num') { if (k === '.' && last.v.includes('.')) return cur; if ((last.v === '0' || last.v === '-0') && k !== '.') last.v = last.v.replace('0', k); else last.v += k; }
+      else { if (isValueEnd(last)) T.push({ t: 'op', v: '*' }); T.push({ t: 'num', v: k === '.' ? '0.' : k }); }
+    } else if ('+-*/^'.includes(k) && k.length === 1) {
+      if (!last || last.t === '(') { if (k === '-') T.push({ t: 'op', v: '-' }); }
+      else if (last.t === 'op') { if (k === '-' && last.v !== '-' && last.v !== '+') T.push({ t: 'op', v: '-' }); else if (T.length > 1 && T[T.length - 2].t !== 'op') last.v = k; }
+      else T.push({ t: 'op', v: k });
+    } else if (k === '%') { if (isValueEnd(last) && last.t !== '%') T.push({ t: '%' }); }
+    else if (k === '(') { if (isValueEnd(last)) T.push({ t: 'op', v: '*' }); T.push({ t: '(' }); }
+    else if (k === ')') { const open = T.filter(t => t.t === '(').length - T.filter(t => t.t === ')').length; if (open > 0 && isValueEnd(last)) T.push({ t: ')' }); }
+    else if (k === 'back') { if (last && last.t === 'num' && last.v.replace('-', '').length > 1) last.v = last.v.slice(0, -1); else T.pop(); }
+    else if (k === 'neg') { if (last && last.t === 'num') last.v = last.v[0] === '-' ? last.v.slice(1) : '-' + last.v; else if (!last || last.t === 'op' || last.t === '(') T.push({ t: 'num', v: '-0' }); }
+    else if (k === 'C') { T.length = 0; }
+    return cur;
+  }
+  // replace token idx of calc dstId with a live reference to srcId; refuses self/cycles
+  function link(calcs, srcId, dstId, idx) {
+    const dst = calcs.find(c => c.id === dstId);
+    if (!dst || srcId === dstId || !dst.tokens[idx] || dependsOn(calcs, srcId, dstId)) return false;
+    const t = dst.tokens[idx]; if (t.t !== 'num' && t.t !== 'ref') return false;
+    dst.tokens[idx] = { t: 'ref', id: srcId }; return true;
+  }
+  const numStr = v => String(parseFloat(v.toPrecision(12)));
+  // freeze every link touching calc id (its refs and refs to it) into plain numbers; drop graph vars
+  function unlinkAll(calcs, id, vals) {
+    for (const c of calcs) c.tokens.forEach((t, i) => {
+      if (t.t === 'ref' && (c.id === id || t.id === id)) { const r = vals.get(t.id); c.tokens[i] = { t: 'num', v: r && r.value != null ? numStr(r.value) : '0' }; }
+      if (c.id === id && t.graphVar) delete t.graphVar;
+    });
+  }
+  // y = f(x) where token idx of calc c is replaced by x; refs resolved from vals
+  function plotFn(c, idx, vals) {
+    return x => {
+      const T = c.tokens.slice(); T[idx] = { t: 'num', v: String(x) };
+      try { const v = evaluate(T, id => { const r = vals.get(id); if (!r || r.value == null) throw new Error('ref'); return r.value; }); return v == null ? NaN : v; }
+      catch (e) { return NaN; }
+    };
+  }
+
+  const api = { evaluate, evaluateAll, dependsOn, format, applyKey, link, unlinkAll, plotFn, isValueEnd, numStr };
   if (typeof module !== 'undefined') module.exports = api; else root.TydligEngine = api;
 })(this);

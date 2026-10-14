@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
-<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#16171a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121214" media="(prefers-color-scheme: dark)">
 <title>mwkcal</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
@@ -13,19 +13,21 @@
 </head>
 <body>
 <div id="app">
-  <div id="canvas"><div id="world"></div><div id="hint">빈 곳을 탭해서 계산을 시작하세요</div></div>
+  <div id="canvas"><div id="world"></div><div id="hint">빈 곳을 탭하거나 바로 숫자를 입력하세요<br><small>길게 눌러 메뉴 · 결과를 끌어 연결</small></div></div>
   <div id="pad">
-    <div class="bar"><button data-k="del-calc" class="ghost" id="delCalc">🗑 삭제</button><button data-k="done" class="ghost">완료</button></div>
     <div class="keys">
-      <button data-k="C" class="fn">C</button><button data-k="(" class="fn">(</button><button data-k=")" class="fn">)</button><button data-k="/" class="op">÷</button>
-      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button><button data-k="*" class="op">×</button>
-      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button><button data-k="-" class="op">−</button>
-      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button><button data-k="+" class="op">+</button>
-      <button data-k="%" class="fn">%</button><button data-k="0">0</button><button data-k=".">.</button><button data-k="^" class="fn">x<sup>y</sup></button>
-      <button data-k="back" class="fn">⌫</button><button data-k="=" class="eq">=</button>
+      <button data-k="collapse" class="g" aria-label="키패드 접기">⌄</button><button data-k="back" class="g" aria-label="지우기">⌫</button><button data-k="(" class="g">(</button><button data-k=")" class="g">)</button>
+      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button><button data-k="/" class="o">÷</button>
+      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button><button data-k="*" class="o">×</button>
+      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button><button data-k="-" class="o">−</button>
+      <button data-k="0">0</button><button data-k=".">.</button><button data-k="neg">+/−</button><button data-k="+" class="o">+</button>
+      <button data-k="%" class="g">%</button><button data-k="^" class="g">x<sup>y</sup></button><button data-k="C" class="g">C</button><button data-k="=" class="o">=</button>
     </div>
   </div>
+  <button id="padFab" aria-label="키패드 열기">⌃</button>
 </div>
+<div id="menu" role="menu"></div>
+<svg id="linkLayer"><path id="linkPath"/></svg>
 <script src="engine.js"></script>
 <script src="app.js"></script>
 </body>
