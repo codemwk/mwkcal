@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16171a" media="(prefers-color-scheme: dark)">
+<title>Tydlig</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <div id="canvas"><div id="world"></div><div id="hint">빈 곳을 탭해서 계산을 시작하세요</div></div>
+  <div id="pad">
+    <div class="bar"><button data-k="del-calc" class="ghost" id="delCalc">🗑 삭제</button><button data-k="done" class="ghost">완료</button></div>
+    <div class="keys">
+      <button data-k="C" class="fn">C</button><button data-k="(" class="fn">(</button><button data-k=")" class="fn">)</button><button data-k="/" class="op">÷</button>
+      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button><button data-k="*" class="op">×</button>
+      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button><button data-k="-" class="op">−</button>
+      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button><button data-k="+" class="op">+</button>
+      <button data-k="%" class="fn">%</button><button data-k="0">0</button><button data-k=".">.</button><button data-k="^" class="fn">x<sup>y</sup></button>
+      <button data-k="back" class="fn">⌫</button><button data-k="=" class="eq">=</button>
+    </div>
+  </div>
+</div>
+<script src="engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
