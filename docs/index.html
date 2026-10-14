@@ -13,6 +13,7 @@
 </head>
 <body>
 <div id="app">
+  <div id="toolbar"><span id="noteName"></span><button id="undoBtn" aria-label="실행 취소" title="실행 취소">↶</button><button id="redoBtn" aria-label="다시 실행" title="다시 실행">↷</button><button id="memoBtn">메모</button><button id="notesBtn">노트</button></div>
   <div id="canvas"><div id="sizer"><div id="world"></div></div><div id="hint">빈 곳을 탭하거나 바로 숫자를 입력하세요<br><small>길게 눌러 메뉴 · 결과를 끌어 연결</small></div></div>
   <div id="pad">
     <div class="keys extra"><button data-k="collapse" class="g" aria-label="키패드 접기">⌄</button><button data-k="%" class="g">%</button><button data-k="^" class="g">x<sup>y</sup></button></div>
@@ -26,6 +27,10 @@
   </div>
   <button id="padFab" aria-label="키패드 열기">⌃</button>
 </div>
+
+<div id="toast"></div>
+<div id="dlg"><div class="box"><div class="t"></div><input id="dlgIn" maxlength="80" autocomplete="off"><div class="btns"><button data-a="del" class="danger">삭제</button><span></span><button data-a="cancel">취소</button><button data-a="ok" class="ok">확인</button></div></div></div>
+<div id="notes"><div class="hd"><b>노트</b><span><button data-n="new">새 노트</button><button data-n="import">가져오기</button><button data-n="close">닫기</button></span></div><ul id="noteList"></ul><input type="file" id="importFile" accept=".json,application/json" hidden></div>
 <div id="menu" role="menu"></div>
 <svg id="linkLayer"></svg>
 <div id="ghost"></div>

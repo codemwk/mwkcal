@@ -82,3 +82,43 @@ button[data-k=back]{touch-action:none}
 
 #pad,#pad button,#padFab{touch-action:none}
 #pad button.down{filter:brightness(.82)}
+
+/* toolbar */
+#toolbar{flex:none;display:flex;gap:6px;align-items:center;padding:calc(4px + env(safe-area-inset-top)) 8px 4px;background:var(--bg);border-bottom:1px solid var(--keyg)}
+#noteName{margin-right:auto;font-size:13px;color:var(--mut);padding:3px 2px;border-radius:8px;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#toolbar button{height:32px;min-width:40px;padding:0 10px;font-size:15px;font-weight:400;border-radius:10px;background:var(--keyg)}
+#toolbar button[disabled]{opacity:.35}
+#memoBtn.on{background:var(--org);color:#fff}
+#toast{position:fixed;left:50%;top:56px;transform:translateX(-50%);background:#2c2c2e;color:#fff;font-size:14px;padding:7px 14px;border-radius:10px;z-index:30;display:none;pointer-events:none}
+#toast.show{display:block}
+/* memos */
+.tok,.res{position:relative}
+.memo{position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:2px;font-size:11px;line-height:1.3;font-weight:400;color:var(--mut);background:var(--bg);border:1px solid var(--keyg);padding:0 5px;border-radius:6px;white-space:nowrap;max-width:170px;overflow:hidden;text-overflow:ellipsis;pointer-events:auto}
+.calc.memos{padding-bottom:20px}
+.tok.sel .memo,.tok.cur .memo,.res.pill .memo{color:var(--mut)}
+/* dialog + notes sheet */
+#dlg{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:flex-start;justify-content:center;z-index:40;padding-top:18vh}
+#dlg.show{display:flex}
+#dlg .box{background:var(--card);border-radius:14px;padding:16px;width:min(92vw,380px);box-shadow:var(--shadow)}
+#dlg .t{font-size:15px;font-weight:500;margin-bottom:10px}
+#dlg input{width:100%;font:inherit;font-size:17px;padding:9px 10px;border-radius:9px;border:1px solid var(--keyg);background:var(--bg);color:var(--fg);user-select:text;-webkit-user-select:text}
+#dlg.noinput input{display:none}
+#dlg .btns{display:flex;gap:8px;margin-top:12px}
+#dlg .btns span{flex:1}
+#dlg button{height:38px;font-size:15px;font-weight:400;padding:0 14px;border-radius:9px;background:var(--keyg)}
+#dlg button.ok{background:var(--org);color:#fff}
+#dlg button.danger{color:#e8443a;background:none}
+#notes{position:fixed;inset:0;background:var(--bg);z-index:35;display:none;flex-direction:column}
+#notes.show{display:flex}
+#notes .hd{display:flex;justify-content:space-between;align-items:center;padding:calc(12px + env(safe-area-inset-top)) 14px 10px;border-bottom:1px solid var(--keyg);font-size:19px}
+#notes .hd button{height:34px;font-size:14px;font-weight:400;padding:0 10px;margin-left:6px;border-radius:9px;background:var(--keyg)}
+#noteList{list-style:none;margin:0;padding:0;overflow:auto;flex:1}
+#noteList li{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--keyg)}
+#noteList li.current{background:color-mix(in srgb,var(--org) 10%,transparent)}
+#noteList .info{flex:1;min-width:0}
+#noteList .nm{font-size:17px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#noteList .tm{font-size:12px;color:var(--mut);margin-top:2px}
+#noteList li button{height:32px;font-size:13px;font-weight:400;padding:0 8px;border-radius:8px;background:var(--keyg)}
+#noteList li button[data-a=del]{color:#e8443a}
+
+.calc.selected{outline:2px solid var(--org);outline-offset:1px}

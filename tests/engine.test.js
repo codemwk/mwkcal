@@ -59,4 +59,22 @@ const f=E.plotFn(pc,0,pv);eq('plot f(3)',f(3),10);eq('plot f(-2)',f(-2),5);
 const g=E.plotFn({id:4,tokens:[n(1),o('/'),n(5)]},2,pv);if(isNaN(g(0)))pass++;else{fail++;console.log('FAIL plot div0 NaN')}
 eq('plot tiny x',E.plotFn({id:5,tokens:[n(1),o('*'),n(1)]},2,pv)(1e-7),1e-7);
 for (const [v,e] of [[1019,'1,019'],[1042/1065,'0.9784'],[10/3,'3.3333'],[0.00123456,'0.001235'],[-1234.5,'-1,234.5'],[1e20,'1e+20'],[2.5e-8,'2.5e-8'],[0,'0']]) { if (E.format(v)===e) pass++; else { fail++; console.log('FAIL format',v,E.format(v),'!=',e); } }
+
+// ---- history ----
+{ const h=new E.History(5); h.reset('s0'); ['s1','s2','s3'].forEach(x=>h.push(x));
+  const u=[h.undo(),h.undo()]; if(u.join()==='s2,s1'&&h.canRedo&&h.redo()==='s2')pass++;else{fail++;console.log('FAIL hist undo/redo',u)}
+  h.push('x'); if(!h.canRedo&&h.list.join()==='s0,s1,s2,x')pass++;else{fail++;console.log('FAIL hist branch',h.list)}
+  if(h.push('x')===false)pass++;else{fail++;console.log('FAIL hist dedupe')}
+  h.push('a','slide');h.push('b','slide');h.push('c','slide'); if(h.list.slice(-2).join()==='x,c')pass++;else{fail++;console.log('FAIL hist coalesce',h.list)}
+  for(let i=0;i<10;i++)h.push('k'+i); if(h.list.length===5&&h.list[4]==='k9')pass++;else{fail++;console.log('FAIL hist cap')}
+  let n=0; while(h.undo()!=null)n++; if(n===4&&!h.canUndo)pass++;else{fail++;console.log('FAIL hist undo to start',n)} }
+// ---- memos survive edits / links / unlink ----
+{ const cs=[{id:1,tokens:[n(1),o('+'),n(1)],resMemo:'sum'},{id:2,tokens:[n(5),o('*'),n(2)]}];
+  cs[0].tokens[0].memo='first'; cs[0].tokens[2].memo='second'; cs[1].tokens[2].memo='rate';
+  const cur={tok:2,fresh:true}; E.applyKey(cs[0],cur,'7'); if(cs[0].tokens[2].memo==='second'&&cs[0].tokens[2].v==='7')pass++;else{fail++;console.log('FAIL memo after edit')}
+  E.applyKey(cs[0],{tok:0,fresh:true},'back'); if(cs[0].tokens[0].memo==='first')pass++;else{fail++;console.log('FAIL memo after back')}
+  E.link(cs,1,2,2); if(cs[1].tokens[2].t==='ref'&&cs[1].tokens[2].memo==='rate')pass++;else{fail++;console.log('FAIL memo after link')}
+  E.applyKey(cs[1],{tok:2,fresh:true},'3'); if(cs[1].tokens[2].t==='num'&&cs[1].tokens[2].memo==='rate')pass++;else{fail++;console.log('FAIL memo ref→num')}
+  E.link(cs,1,2,2); E.unlinkAll(cs,1,E.evaluateAll(cs)); if(cs[1].tokens[2].memo==='rate'&&cs[0].resMemo==='sum')pass++;else{fail++;console.log('FAIL memo after unlink')}
+  const rt=JSON.parse(JSON.stringify(cs)); if(rt[0].tokens[2].memo==='second'&&rt[0].resMemo==='sum')pass++;else{fail++;console.log('FAIL memo serialize')} }
 console.log(`${pass} passed, ${fail} failed`);process.exit(fail?1:0);

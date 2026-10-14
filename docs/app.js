@@ -9,13 +9,25 @@
   const OPS = { '+': '+', '-': '−', '*': '×', '/': '/', '^': '^' };
   let state = load(), cur = null, lastDone = null, vals = new Map(), lastVals = new Map(), clip = null, sliding = false;
   const els = new Map(), gels = new Map();
+  // ---- notes (each note = one canvas doc; KEY holds the live working copy of the current note) ----
+  const NIDX = 'mwkcal-notes', nkey = id => 'mwkcal-note-' + id, newId = () => 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  let notes = loadNotes();
+  function loadNotes() {
+    try { const n = JSON.parse(localStorage.getItem(NIDX)); if (n && n.list && n.list.length) return n; } catch (e) {}
+    const id = newId(), n = { current: id, list: [{ id, name: '노트 1', updated: Date.now() }] };
+    try { localStorage.setItem(nkey(id), JSON.stringify(state)); localStorage.setItem(NIDX, JSON.stringify(n)); } catch (e) {}
+    return n;
+  }
+  // ---- undo / redo ----
+  const hist = new E.History(200); let restoring = false, memoPick = false;
+  const docOf = () => JSON.stringify({ calcs: state.calcs.filter(c => c.tokens.length), graphs: state.graphs, nextId: state.nextId, colors: state.colors, nextColor: state.nextColor, lastId: state.lastId });
 
   function load() {
     for (const k of [KEY, OLD]) { try { const s = JSON.parse(localStorage.getItem(k)); if (s && Array.isArray(s.calcs)) return norm(s); } catch (e) {} }
     return norm({});
   }
   function norm(s) { return { calcs: s.calcs || [], graphs: s.graphs || [], nextId: s.nextId || 1, padOpen: s.padOpen !== false, colors: s.colors || {}, nextColor: s.nextColor || 0, lastId: s.lastId == null ? null : s.lastId, zoom: s.zoom || 1, sx: s.sx || 0, sy: s.sy || 0 }; }
-  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+  function save() { try { const j = JSON.stringify(state); localStorage.setItem(KEY, j); if (notes && notes.current) localStorage.setItem(nkey(notes.current), j); } catch (e) {} }
   const get = id => state.calcs.find(c => c.id === id);
   // each linked source result gets the next link color in sequence (green, red-orange, indigo, ...)
   const peekColor = id => LINKC[(state.colors[id] != null ? state.colors[id] : state.nextColor) % LINKC.length];
@@ -34,25 +46,26 @@
   const fmtVal = v => E.format(v).replace(/^-/, '−');
 
   // ---------------- rendering ----------------
+  const memoHTML = m => (m ? `<span class="memo">${esc(m)}</span>` : '');
   function rowHTML(c, linked) {
     const r = vals.get(c.id) || {}, act = cur && cur.id === c.id;
-    const typing = act && cur.tok == null, lastI = c.tokens.length - 1;
+    const typing = act && cur.tok == null && !cur.whole, lastI = c.tokens.length - 1;
     let h = '<span class="expr">';
     c.tokens.forEach((t, i) => {
       const sel = act && cur.tok === i ? ' sel' : typing && i === lastI ? ' cur' : '';
-      if (t.t === 'num') h += `<span class="tok num${t.graphVar ? ' gvar' : ''}${sel}" data-i="${i}">${esc(fmtNum(t.v))}</span>`;
-      else if (t.t === 'ref') { const rv = vals.get(t.id); h += `<span class="tok ref${sel}" data-i="${i}"${sel ? '' : ` style="color:${colorOf(t.id)}"`}>${rv && rv.value != null ? fmtVal(rv.value) : '?'}</span>`; }
+      if (t.t === 'num') h += `<span class="tok num${t.graphVar ? ' gvar' : ''}${sel}" data-i="${i}">${esc(fmtNum(t.v))}${memoHTML(t.memo)}</span>`;
+      else if (t.t === 'ref') { const rv = vals.get(t.id); h += `<span class="tok ref${sel}" data-i="${i}"${sel ? '' : ` style="color:${colorOf(t.id)}"`}>${rv && rv.value != null ? fmtVal(rv.value) : '?'}${memoHTML(t.memo)}</span>`; }
       else if (t.t === 'op') h += `<span class="op${sel}">${t.v === '^' ? '^' : OPS[t.v]}</span>`;
       else h += `<span class="op${sel}">${t.t}</span>`;
     });
     if (typing && !c.tokens.length) h += '<span class="caret"></span>';
     h += '</span>';
     if (typing) return h; // like Tydlig: no result until = (or until an earlier number is edited)
-    if (r.error) h += `<span class="eqs">=</span><span class="res err" data-res="${c.id}">${r.error === 'incomplete' ? '…' : '?'}</span>`;
+    if (r.error) h += `<span class="eqs">=</span><span class="res err" data-res="${c.id}">${r.error === 'incomplete' ? '…' : '?'}${memoHTML(c.resMemo)}</span>`;
     else if (r.value != null) {
       const fl = !sliding && lastVals.has(c.id) && lastVals.get(c.id) !== r.value && !act ? ' flash' : '';
       const lk = linked.has(c.id), pill = !lk && c.id === state.lastId;
-      h += `<span class="eqs">=</span><span class="res${lk ? ' linked' : ''}${pill ? ' pill' : ''}${fl}" data-res="${c.id}"${lk ? ` style="border-color:${colorOf(c.id)};color:${colorOf(c.id)}"` : ''}>${fmtVal(r.value)}</span>`;
+      h += `<span class="eqs">=</span><span class="res${lk ? ' linked' : ''}${pill ? ' pill' : ''}${fl}" data-res="${c.id}"${lk ? ` style="border-color:${colorOf(c.id)};color:${colorOf(c.id)}"` : ''}>${fmtVal(r.value)}${memoHTML(c.resMemo)}</span>`;
     }
     return h;
   }
@@ -79,6 +92,8 @@
       if (!el) { el = document.createElement('div'); el.className = 'calc'; el.dataset.id = c.id; el.innerHTML = '<div class="row"></div>'; world.appendChild(el); els.set(c.id, el); }
       el.style.left = c.x + 'px'; el.style.top = c.y + 'px';
       el.classList.toggle('active', !!(cur && cur.id === c.id));
+      el.classList.toggle('selected', !!(cur && cur.id === c.id && cur.whole));
+      el.classList.toggle('memos', c.tokens.some(t => t.memo) || !!c.resMemo);
       el.firstChild.innerHTML = rowHTML(c, linked);
       syncSliders(el, c);
     }
@@ -88,7 +103,7 @@
     hint.style.display = state.calcs.length || state.graphs.length ? 'none' : '';
     pad.classList.toggle('collapsed', !state.padOpen);
     fab.classList.toggle('show', !state.padOpen);
-    save();
+    commit(sliding ? 'slide' : null); save();
   }
 
   // ---------------- graphs ----------------
@@ -202,6 +217,8 @@
     hideMenu();
     if (k === 'collapse') { state.padOpen = false; return render(); }
     if (k === '=') { const id = cur && cur.id; finish(); lastDone = id && get(id) ? id : null; if (lastDone) state.lastId = lastDone; return render(); }
+    if (k === 'back' && (!cur || cur.whole)) { lastDone = null; return backDelete(); }
+    if (cur && cur.whole) { if (k === 'C') return; cur.whole = false; } // typing on a selected calc continues at its end
     if (!cur) {
       if (['back', 'C', ')'].includes(k)) return;
       const prev = lastDone != null && get(lastDone); lastDone = null;
@@ -214,11 +231,17 @@
     const c = get(cur.id); if (!c) { cur = null; return; }
     E.applyKey(c, cur, k); render();
   }
+  // ⌫ on a whole-selected calc deletes it; with nothing selected it eats the last-created calc backwards
+  function backDelete() {
+    if (cur && cur.whole) { removeCalc(cur.id); cur = null; return render(); }
+    const c = state.calcs.filter(x => x.tokens.length).reduce((a, x) => (!a || x.id > a.id ? x : a), null); if (!c) return;
+    E.applyKey(c, { tok: null }, 'back'); if (!c.tokens.length) removeCalc(c.id); render();
+  }
   function select(id, tok) {
     if (cur && cur.id !== id) finish();
     const c = get(id); if (!c) return;
     const t = tok != null ? c.tokens[tok] : null;
-    cur = t && (t.t === 'num' || t.t === 'ref') ? { id, tok, fresh: true } : { id, tok: null, fresh: false };
+    cur = t && (t.t === 'num' || t.t === 'ref') ? { id, tok, fresh: true } : { id, tok: null, fresh: false, whole: c.tokens.length > 0 };
     openPad(); render();
   }
   function insertRef(id) {
@@ -322,7 +345,8 @@
     lastDone = null;
     if (e.button > 0 || e.target.closest('.slider, button')) return;
     const cEl = e.target.closest('.calc'), gEl = e.target.closest('.graph'), resEl = e.target.closest('.res'), tokEl = e.target.closest('.tok');
-    P = { sx: e.clientX, sy: e.clientY, pid: e.pointerId, moved: false, mode: null, long: false, el: cEl || gEl,
+    const mEl = e.target.closest('.memo'), mHost = mEl && mEl.parentElement;
+    P = { memoT: mHost ? (mHost.dataset.res != null ? 'res' : +mHost.dataset.i) : null, sx: e.clientX, sy: e.clientY, pid: e.pointerId, moved: false, mode: null, long: false, el: cEl || gEl,
       calcId: cEl ? +cEl.dataset.id : null, res: resEl && !resEl.classList.contains('err') ? +resEl.dataset.res : null,
       tok: tokEl ? +tokEl.dataset.i : null, g: gEl ? +gEl.dataset.g : null, onBar: !!e.target.closest('.gbar') };
     if (P.calcId != null) { const c = get(P.calcId); P.ox = c.x; P.oy = c.y; }
@@ -354,9 +378,17 @@
     if (p.mode === 'link') {
       endLink(); dropLink(p.res, e.clientX, e.clientY - GHOST_DY); return render();
     }
-    if (p.mode) { if (p.el) p.el.classList.remove('dragging'); return save(); }
+    if (p.mode) { if (p.el) p.el.classList.remove('dragging'); commit(); return save(); }
+    if (p.memoT != null && p.calcId != null) return editMemo(p.calcId, p.memoT);
+    if (memoPick) {
+      setPick(false);
+      if (p.res != null) return editMemo(p.res, 'res');
+      if (p.tok != null && p.calcId != null) return editMemo(p.calcId, p.tok);
+      return toast('숫자나 결과를 탭해야 메모를 달 수 있어요');
+    }
     if (p.g != null) return;
-    if (p.res != null && !(cur && cur.id === p.res)) return insertRef(p.res);
+    if (p.res != null && cur && cur.id !== p.res && !cur.whole) return insertRef(p.res);
+    if (p.res != null) return select(p.res, null);
     if (p.calcId != null) return select(p.calcId, p.tok);
     const [wx, wy] = toWorld(e.clientX, e.clientY);
     finish(); newCalc(wx - 10, wy - 22); openPad(); render();
@@ -435,9 +467,104 @@
   fab.addEventListener('pointerdown', e => { e.preventDefault(); state.padOpen = true; render(); });
   document.addEventListener('keydown', e => {
     const m = { Enter: '=', Backspace: 'back', Escape: '=', x: '*', X: '*', Delete: 'C' }; const k = m[e.key] || e.key;
+    if (e.target.closest && e.target.closest('input, #dlg, #notes')) return;
+    if ((e.ctrlKey || e.metaKey) && /^[zy]$/i.test(e.key)) { e.preventDefault(); return (e.key.toLowerCase() === 'y' || e.shiftKey) ? doRedo() : doUndo(); }
     if (/^[0-9.+\-*/^%()]$/.test(k) || ['=', 'back', 'C'].includes(k)) { e.preventDefault(); press(k); }
   });
 
+  // ---------------- history ----------------
+  const $undo = $('#undoBtn'), $redo = $('#redoBtn'), $memo = $('#memoBtn'), $toast = $('#toast'), dlg = $('#dlg'), dlgIn = $('#dlgIn');
+  const notesEl = $('#notes'), noteList = $('#noteList'), noteName = $('#noteName'), importFile = $('#importFile');
+  function updHist() { $undo.disabled = !hist.canUndo; $redo.disabled = !hist.canRedo; }
+  function commit(tag) { if (restoring) return; if (hist.push(docOf(), tag)) touchNote(); updHist(); }
+  function restore(snap) {
+    if (snap == null) return; Object.assign(state, JSON.parse(snap)); cur = null; lastDone = null; hideMenu();
+    restoring = true; render(); restoring = false; touchNote(); updHist();
+  }
+  const doUndo = () => restore(hist.undo()), doRedo = () => restore(hist.redo());
+  $undo.addEventListener('click', doUndo); $redo.addEventListener('click', doRedo);
+  let toastT = null; function toast(m, ms = 1800) { $toast.textContent = m; $toast.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => $toast.classList.remove('show'), ms); }
+
+  // ---------------- dialog ----------------
+  function ask({ title, value = '', input = true, del = false, ok = '확인' }) {
+    return new Promise(resolve => {
+      dlg.querySelector('.t').textContent = title; dlgIn.value = value; dlg.classList.toggle('noinput', !input);
+      dlg.querySelector('[data-a=del]').style.visibility = del ? '' : 'hidden'; dlg.querySelector('[data-a=ok]').textContent = ok;
+      dlg.classList.add('show'); if (input) setTimeout(() => { dlgIn.focus(); dlgIn.select(); }, 30);
+      const done = a => { dlg.classList.remove('show'); dlg.onclick = null; dlgIn.onkeydown = null; dlgIn.blur(); resolve(a === 'cancel' ? null : { action: a, value: dlgIn.value }); };
+      dlg.onclick = e => { const b = e.target.closest('button'); if (b) done(b.dataset.a); else if (e.target === dlg) done('cancel'); };
+      dlgIn.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') done('ok'); else if (e.key === 'Escape') done('cancel'); };
+    });
+  }
+
+  // ---------------- memos ----------------
+  function setPick(on) { memoPick = on; $memo.classList.toggle('on', on); }
+  async function editMemo(id, which) {
+    const c = get(id); if (!c) return; const obj = which === 'res' ? c : c.tokens[which]; if (!obj || (which !== 'res' && obj.t !== 'num' && obj.t !== 'ref')) return;
+    const key = which === 'res' ? 'resMemo' : 'memo';
+    const r = await ask({ title: which === 'res' ? '결과 메모' : '숫자 메모', value: obj[key] || '', del: !!obj[key] }); if (!r) return;
+    const v = r.value.trim(); if (r.action === 'del' || !v) delete obj[key]; else obj[key] = v; render();
+  }
+  $memo.addEventListener('click', () => {
+    if (cur && cur.tok != null) return editMemo(cur.id, cur.tok);
+    if (cur && cur.whole) return editMemo(cur.id, 'res');
+    setPick(!memoPick); if (memoPick) toast('메모를 달 숫자나 결과를 탭하세요');
+  });
+
+  // ---------------- notes ----------------
+  const meta = id => notes.list.find(n => n.id === id);
+  function saveIdx() { try { localStorage.setItem(NIDX, JSON.stringify(notes)); } catch (e) {} noteName.textContent = (meta(notes.current) || {}).name || ''; }
+  function touchNote() { const m = meta(notes.current); if (m) { m.updated = Date.now(); saveIdx(); } }
+  function readDoc(id) { if (id === notes.current) return JSON.parse(JSON.stringify(state)); try { return JSON.parse(localStorage.getItem(nkey(id))) || {}; } catch (e) { return {}; } }
+  function switchTo(id, doc) {
+    save(); const d = doc || readDoc(id); notes.current = id; saveIdx();
+    state = norm(d); cur = null; lastDone = null; setPick(false);
+    world.innerHTML = ''; els.clear(); gels.clear(); lastVals = new Map();
+    setZoom(state.zoom); restoring = true; render(); restoring = false; hist.reset(docOf()); updHist();
+    canvas.scrollLeft = state.sx; canvas.scrollTop = state.sy;
+  }
+  function uniqueName(base) { let n = notes.list.length + 1, nm = base || '노트 ' + n; while (notes.list.some(x => x.name === nm)) nm = base ? base + ' (' + ++n + ')' : '노트 ' + ++n; return nm; }
+  function addNote(name, doc) { const id = newId(); notes.list.push({ id, name: uniqueName(name), updated: Date.now() }); try { localStorage.setItem(nkey(id), JSON.stringify(doc || {})); } catch (e) {} switchTo(id, doc || {}); return id; }
+  const when = t => new Date(t).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' });
+  function renderNotes() {
+    noteList.innerHTML = notes.list.slice().sort((a, b) => b.updated - a.updated).map(n => `<li data-id="${n.id}"${n.id === notes.current ? ' class="current"' : ''}><div class="info"><div class="nm">${esc(n.name)}</div><div class="tm">${when(n.updated)}</div></div><button data-a="rename">이름</button><button data-a="dup">복제</button><button data-a="export">내보내기</button><button data-a="del">삭제</button></li>`).join('');
+  }
+  function exportNote(id) {
+    const m = meta(id), blob = new Blob([JSON.stringify({ app: 'mwkcal', version: 1, name: m.name, doc: readDoc(id) }, null, 1)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = m.name.replace(/[\\/:*?"<>|]/g, '_') + '.mwkcal.json'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  $('#notesBtn').addEventListener('click', () => { save(); renderNotes(); notesEl.classList.add('show'); });
+  notesEl.addEventListener('click', async e => {
+    const nb = e.target.closest('[data-n]');
+    if (nb) {
+      if (nb.dataset.n === 'close') notesEl.classList.remove('show');
+      else if (nb.dataset.n === 'new') { addNote(); notesEl.classList.remove('show'); }
+      else if (nb.dataset.n === 'import') importFile.click();
+      return;
+    }
+    const li = e.target.closest('li'); if (!li) return; const id = li.dataset.id, m = meta(id), a = e.target.closest('button');
+    if (!a) { if (id !== notes.current) switchTo(id); notesEl.classList.remove('show'); return; }
+    if (a.dataset.a === 'rename') { const r = await ask({ title: '노트 이름', value: m.name }); if (r && r.value.trim()) { m.name = r.value.trim(); saveIdx(); } }
+    else if (a.dataset.a === 'dup') { addNote(m.name + ' 복사본', readDoc(id)); }
+    else if (a.dataset.a === 'export') exportNote(id);
+    else if (a.dataset.a === 'del') {
+      const r = await ask({ title: `'${m.name}' 노트를 삭제할까요?`, input: false, ok: '삭제' }); if (!r) return;
+      notes.list = notes.list.filter(n => n.id !== id); try { localStorage.removeItem(nkey(id)); } catch (err) {}
+      if (id === notes.current) notes.current = null; // never write the deleted canvas anywhere
+      if (!notes.list.length) addNote();
+      else if (!notes.current) { const nx = notes.list.slice().sort((x, y) => y.updated - x.updated)[0]; let d = {}; try { d = JSON.parse(localStorage.getItem(nkey(nx.id))) || {}; } catch (err) {} state = norm(d); notes.current = nx.id; switchTo(nx.id, d); }
+      else saveIdx();
+    }
+    renderNotes();
+  });
+  importFile.addEventListener('change', async () => {
+    const f = importFile.files[0]; importFile.value = ''; if (!f) return;
+    try { const j = JSON.parse(await f.text()), doc = j.doc || j; if (!Array.isArray(doc.calcs)) throw new Error('bad');
+      addNote(j.name || f.name.replace(/\.mwkcal\.json$|\.json$/i, ''), doc); notesEl.classList.remove('show'); toast('노트를 가져왔어요'); }
+    catch (err) { toast('가져올 수 없는 파일이에요'); }
+  });
+
   setZoom(state.zoom); render(); canvas.scrollLeft = state.sx; canvas.scrollTop = state.sy;
+  hist.reset(docOf()); updHist(); saveIdx();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

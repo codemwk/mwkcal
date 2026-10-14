@@ -94,6 +94,21 @@
   }
 
 
+  const keep = (old, nu) => { if (old && old.memo) nu.memo = old.memo; return nu; }; // memos survive token replacement
+  // undo/redo over serialized snapshots; consecutive entries with the same coalesce tag (e.g. slider scrub) merge
+  class History {
+    constructor(cap = 200) { this.cap = cap; this.list = []; this.i = -1; this.tag = null; }
+    reset(s) { this.list = [s]; this.i = 0; this.tag = null; }
+    push(s, tag = null) {
+      if (s === this.list[this.i]) return false;
+      if (tag && tag === this.tag && this.i === this.list.length - 1 && this.i > 0) { this.list[this.i] = s; return true; }
+      this.list.length = this.i + 1; this.list.push(s); this.tag = tag;
+      if (this.list.length > this.cap) this.list.shift(); this.i = this.list.length - 1; return true;
+    }
+    undo() { if (this.i <= 0) return null; this.tag = null; return this.list[--this.i]; }
+    redo() { if (this.i >= this.list.length - 1) return null; this.tag = null; return this.list[++this.i]; }
+    get canUndo() { return this.i > 0; } get canRedo() { return this.i < this.list.length - 1; }
+  }
   // ---------- editing helpers (pure, mutate calc tokens) ----------
   const isValueEnd = t => !!t && (t.t === 'num' || t.t === 'ref' || t.t === ')' || t.t === '%');
   // cur = {tok: index|null, fresh: bool}; tok!=null means a specific number token is selected
@@ -103,17 +118,17 @@
       const t = T[cur.tok];
       if (!t) cur.tok = null;
       else if (/^[0-9.]$/.test(k)) {
-        if (t.t !== 'num') { T[cur.tok] = { t: 'num', v: k === '.' ? '0.' : k }; cur.fresh = false; return cur; }
+        if (t.t !== 'num') { T[cur.tok] = keep(t, { t: 'num', v: k === '.' ? '0.' : k }); cur.fresh = false; return cur; }
         if (cur.fresh) { t.v = k === '.' ? '0.' : k; cur.fresh = false; return cur; }
         if (k === '.' && t.v.includes('.')) return cur;
         if ((t.v === '0' || t.v === '-0') && k !== '.') t.v = t.v.replace('0', k); else t.v += k;
         return cur;
       } else if (k === 'back') {
         if (t.t === 'num') { const nv = t.v.slice(0, -1); if (nv === '' || nv === '-') { t.v = '0'; cur.fresh = true; } else { t.v = nv; cur.fresh = false; } }
-        else { T[cur.tok] = { t: 'num', v: '0' }; cur.fresh = true; }
+        else { T[cur.tok] = keep(t, { t: 'num', v: '0' }); cur.fresh = true; }
         return cur;
       } else if (k === 'neg') { if (t.t === 'num') t.v = t.v[0] === '-' ? t.v.slice(1) : '-' + t.v; return cur; }
-      else if (k === 'C') { if (t.t === 'num') t.v = '0'; else T[cur.tok] = { t: 'num', v: '0' }; cur.fresh = true; return cur; }
+      else if (k === 'C') { if (t.t === 'num') t.v = '0'; else T[cur.tok] = keep(t, { t: 'num', v: '0' }); cur.fresh = true; return cur; }
       else cur.tok = null; // operators etc. continue at the end of the expression
     }
     const last = T[T.length - 1];
@@ -137,13 +152,13 @@
     const dst = calcs.find(c => c.id === dstId);
     if (!dst || srcId === dstId || !dst.tokens[idx] || dependsOn(calcs, srcId, dstId)) return false;
     const t = dst.tokens[idx]; if (t.t !== 'num' && t.t !== 'ref') return false;
-    dst.tokens[idx] = { t: 'ref', id: srcId }; return true;
+    dst.tokens[idx] = keep(t, { t: 'ref', id: srcId }); return true;
   }
   const numStr = v => String(parseFloat(v.toPrecision(12)));
   // freeze every link touching calc id (its refs and refs to it) into plain numbers; drop graph vars
   function unlinkAll(calcs, id, vals) {
     for (const c of calcs) c.tokens.forEach((t, i) => {
-      if (t.t === 'ref' && (c.id === id || t.id === id)) { const r = vals.get(t.id); c.tokens[i] = { t: 'num', v: r && r.value != null ? numStr(r.value) : '0' }; }
+      if (t.t === 'ref' && (c.id === id || t.id === id)) { const r = vals.get(t.id); c.tokens[i] = keep(t, { t: 'num', v: r && r.value != null ? numStr(r.value) : '0' }); }
       if (c.id === id && t.graphVar) delete t.graphVar;
     });
   }
@@ -156,6 +171,6 @@
     };
   }
 
-  const api = { evaluate, evaluateAll, dependsOn, format, applyKey, link, unlinkAll, plotFn, isValueEnd, numStr };
+  const api = { History, keep, evaluate, evaluateAll, dependsOn, format, applyKey, link, unlinkAll, plotFn, isValueEnd, numStr };
   if (typeof module !== 'undefined') module.exports = api; else root.TydligEngine = api;
 })(this);

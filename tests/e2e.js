@@ -248,6 +248,125 @@ let fails = 0; const ok = (c, m) => { console.log((c ? '  ok  ' : '  FAIL ') + m
     ok((await num()) === exp.slice(0, -1), 'backspace tap still deletes one char');
     await ctx.close();
   }
+
+  // ---- undo/redo, memos, notes (touch) ----
+  for (const [w, h, name] of [[412, 915, 'folded'], [884, 1104, 'unfolded']]) {
+    console.log(name + ' (undo / memo / notes)');
+    const ctx = await b.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 2, acceptDownloads: true });
+    const p = await ctx.newPage(); p.on('console', m => m.type() === 'error' && errs.push(m.text())); p.on('pageerror', e => errs.push(e.message));
+    await p.goto(URL); const cdp = await ctx.newCDPSession(p);
+    const T = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+    const tap = async (x, y) => { await T('touchStart', x, y); await p.waitForTimeout(30); await T('touchEnd'); await p.waitForTimeout(60); };
+    const tapSel = async sel => { const [x, y] = await center(p, sel); await tap(x, y); };
+    const drag = async (x1, y1, x2, y2) => { await T('touchStart', x1, y1); for (let i = 1; i <= 12; i++) { await T('touchMove', x1 + (x2 - x1) * i / 12, y1 + (y2 - y1) * i / 12); await p.waitForTimeout(16); } await T('touchEnd'); await p.waitForTimeout(80); };
+    const k = async s => { for (const c of (Array.isArray(s) ? s : [...s])) await tapSel(`#pad button[data-k="${c}"]`); };
+    const st = () => p.evaluate(() => JSON.parse(localStorage['mwkcal-v2']));
+    const expr = async (i = 0) => { const c = (await st()).calcs[i]; return c ? c.tokens.map(t => t.v || t.t).join('') : null; };
+    const resTxt = id => p.$eval(`[data-res="${id}"]`, e => e.firstChild.textContent);
+    const memos = () => p.$$eval('.memo', es => es.map(e => e.textContent));
+    const memo = async (text) => { await p.waitForSelector('#dlg.show'); await p.fill('#dlgIn', text); await tapSel('#dlg button[data-a="ok"]'); await p.waitForTimeout(60); };
+
+    // undo / redo chain
+    ok(await p.locator('#undoBtn[disabled]').count() === 1, 'undo disabled on fresh canvas');
+    await k('12+3='); ok((await resTxt(1)) === '15', '12+3=15');
+    await tapSel('#undoBtn'); ok((await expr()) === '12+', 'undo → 12+');
+    await tapSel('#undoBtn'); ok((await expr()) === '12', 'undo → 12');
+    await tapSel('#redoBtn'); await tapSel('#redoBtn'); ok((await expr()) === '12+3' && (await resTxt(1)) === '15', 'redo ×2 → 12+3 = 15');
+    const pos0 = (await st()).calcs[0]; const [ox, oy] = await center(p, '.calc[data-id="1"] .op');
+    await drag(ox, oy, ox + 70, oy + 90); const pos1 = (await st()).calcs[0]; ok(pos1.y > pos0.y + 50, 'calc moved');
+    await tapSel('#undoBtn'); const pos2 = (await st()).calcs[0]; ok(pos2.x === pos0.x && pos2.y === pos0.y, 'undo restores position');
+    await tapSel('#redoBtn'); ok((await st()).calcs[0].y === pos1.y, 'redo re-applies move');
+    const bb = await p.locator('#pad button[data-k="back"]').boundingBox(); const by = bb.y + bb.height / 2;
+    await drag(bb.x + 8, by, bb.x + bb.width - 8, by); await tapSel('#pad button[data-k="back"]'); ok(await p.locator('.calc').count() === 0, 'swipe-clear-all');
+    await tapSel('#undoBtn'); ok(await p.locator('.calc').count() === 1 && (await resTxt(1)) === '15', 'undo restores after clear-all');
+    await tapSel('#redoBtn'); ok(await p.locator('.calc').count() === 0, 'redo clears again'); await tapSel('#undoBtn');
+
+    // memos on the three tokens of 1+1=2
+    await k('='); const cv = await p.locator('#canvas').boundingBox(); await tap(cv.x + 30, cv.y + cv.height - 120); await k('1+1=');
+    const id = Math.max(...(await st()).calcs.map(c => c.id)); ok((await resTxt(id)) === '2', '1+1=2');
+    await tapSel(`.calc[data-id="${id}"] .tok[data-i="0"]`); await tapSel('#memoBtn'); await memo('첫째');
+    await tapSel(`.calc[data-id="${id}"] .tok[data-i="2"]`); await tapSel('#memoBtn'); await memo('둘째');
+    await k('='); await tapSel('#memoBtn'); ok(await p.locator('#memoBtn.on').count() === 1, 'memo pick mode');
+    await tapSel(`[data-res="${id}"]`); await memo('합계');
+    ok((await memos()).sort().join() === ['둘째', '첫째', '합계'].sort().join(), 'three memos: ' + (await memos()).join(','));
+    let c = (await st()).calcs.find(x => x.id === id); ok(c.tokens[0].memo === '첫째' && c.tokens[2].memo === '둘째' && c.resMemo === '합계', 'memos attached to the right tokens');
+    await p.screenshot({ path: `screens/memo-${name}.png` });
+    await tapSel(`.calc[data-id="${id}"] .tok[data-i="0"]`); await k('5='); ok((await resTxt(id)) === '6' && (await memos()).length === 3, 'memos survive recalculation (5+1=6)');
+    // link result 15 onto the second 1 → memo stays
+    const [rx, ry] = await center(p, '[data-res="1"]'), [tx, ty] = await center(p, `.calc[data-id="${id}"] .tok[data-i="2"]`);
+    await drag(rx, ry, tx, ty + G); c = (await st()).calcs.find(x => x.id === id);
+    ok(c.tokens[2].t === 'ref' && c.tokens[2].memo === '둘째' && (await resTxt(id)) === '20', 'memo survives linking (5+15=20)');
+    await tapSel('#undoBtn'); ok((await resTxt(id)) === '6' && (await memos()).length === 3, 'undo link keeps memos');
+    await tapSel(`[data-res="${id}"] .memo`); ok((await p.inputValue('#dlgIn')) === '합계', 'tap memo label → editor prefilled');
+    await memo(''); ok((await memos()).length === 2, 'empty text removes memo');
+    await tapSel('#undoBtn'); ok((await memos()).length === 3, 'undo restores memo');
+
+    // notes: rename, new note, switch, reload, reopen + edit, export/import
+    await tapSel('#notesBtn'); ok(await p.locator('#noteList li').count() === 1 && (await p.textContent('#noteList .nm')) === '노트 1', 'first note "노트 1" (migrated canvas)');
+    await tapSel('#noteList li button[data-a="rename"]'); await memo('가계부'); ok((await p.textContent('#noteList .nm')) === '가계부', 'rename note');
+    await p.screenshot({ path: `screens/notes-${name}.png` });
+    await tapSel('#notes [data-n="new"]'); ok(await p.locator('.calc').count() === 0 && (await p.textContent('#noteName')) === '노트 2', 'new empty note');
+    await k('7*6='); ok((await resTxt(1)) === '42', 'note 2: 7×6=42');
+    await tapSel('#notesBtn'); ok(await p.locator('#noteList li').count() === 2, 'two notes listed');
+    await tapSel('#noteList li:not(.current) .info'); ok((await p.textContent('#noteName')) === '가계부' && (await memos()).length === 3 && (await resTxt(id)) === '6', 'switch back: memos + results live');
+    await p.reload(); await p.waitForTimeout(200);
+    ok((await p.textContent('#noteName')) === '가계부' && (await memos()).length === 3 && (await resTxt(1)) === '15', 'reload keeps current note');
+    await tapSel('#notesBtn'); await tapSel('#noteList li:not(.current) .info'); ok((await resTxt(1)) === '42', 'reopen note 2 after reload');
+    await tapSel('.calc[data-id="1"] .tok[data-i="2"]'); await k('8='); ok((await resTxt(1)) === '56', 'edit reopened note (7×8=56)');
+    await p.reload(); await p.waitForTimeout(200); ok((await p.textContent('#noteName')) === '노트 2' && (await resTxt(1)) === '56', 'autosaved edit survives reload');
+    await tapSel('#notesBtn'); const dl = p.waitForEvent('download'); await tapSel('#noteList li.current button[data-a="export"]'); const d = await dl;
+    const fpath = `/tmp/mwkcal-export-${name}.json`; await d.saveAs(fpath); ok(d.suggestedFilename() === '노트 2.mwkcal.json', 'export ' + d.suggestedFilename());
+    await p.setInputFiles('#importFile', fpath); await p.waitForTimeout(200);
+    ok((await p.textContent('#noteName')) === '노트 2 (3)' || (await p.textContent('#noteName')).startsWith('노트 2'), 'import → new note ' + await p.textContent('#noteName'));
+    ok((await resTxt(1)) === '56' && (await st()).calcs.length === 1, 'imported note is live');
+    await tapSel('#notesBtn'); ok(await p.locator('#noteList li').count() === 3, 'three notes');
+    await tapSel('#noteList li.current button[data-a="del"]'); await p.waitForSelector('#dlg.show'); await tapSel('#dlg button[data-a="ok"]'); await p.waitForTimeout(100);
+    ok(await p.locator('#noteList li').count() === 2, 'delete note');
+    await p.screenshot({ path: `screens/notes-${name}-after.png` });
+    await ctx.close();
+  }
+
+  // ---- backspace on finished calcs ----
+  for (const [w, h, name] of [[412, 915, 'folded'], [884, 1104, 'unfolded']]) {
+    console.log(name + ' (backspace on finished calcs)');
+    const ctx = await b.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+    const p = await ctx.newPage(); p.on('console', m => m.type() === 'error' && errs.push(m.text())); p.on('pageerror', e => errs.push(e.message));
+    await p.goto(URL); const cdp = await ctx.newCDPSession(p);
+    const T = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+    const tap = async (x, y) => { await T('touchStart', x, y); await p.waitForTimeout(30); await T('touchEnd'); await p.waitForTimeout(60); };
+    const tapSel = async sel => { const [x, y] = await center(p, sel); await tap(x, y); };
+    const k = async s => { for (const c of (Array.isArray(s) ? s : [...s])) await tapSel(`#pad button[data-k="${c}"]`); };
+    const back = () => k(['back']);
+    const st = () => p.evaluate(() => JSON.parse(localStorage['mwkcal-v2']));
+    const exprOf = async id => { const c = (await st()).calcs.find(x => x.id === id); return c ? c.tokens.map(t => t.t === 'ref' ? '#' + t.id : t.v || t.t).join('') : null; };
+    const n = async () => p.locator('.calc').count();
+    const res = id => p.$eval(`[data-res="${id}"]`, e => e.firstChild.textContent);
+    const cv = await p.locator('#canvas').boundingBox();
+    // (a) scattered calcs; select whole → ⌫ deletes; selected number → ⌫ edits it
+    await tap(cv.x + 30, cv.y + 30); await k('1+1=');            // #1
+    await k('+5=');                                               // #2 = #1 + 5 (chain link)
+    await tap(cv.x + cv.width / 2, cv.y + 200); await k('9*9=');  // #3
+    await tap(cv.x + 40, cv.y + 300); await k('3+3=');            // #4
+    ok((await n()) === 4 && (await res(2)) === '7', '4 scattered calcs, #2 = 2+5 = 7');
+    await tapSel('[data-res="1"]'); ok(await p.locator('.calc[data-id="1"].selected').count() === 1 && (await res(1)) === '2', 'tap result selects whole calc (outlined, result visible)');
+    await back(); ok((await n()) === 3 && (await res(2)) === '?' && (await p.textContent('.calc[data-id="2"] .tok.ref')) === '?', '⌫ deletes selected calc; link to it shows ?');
+    await tapSel('.calc[data-id="3"] .op'); await back(); ok((await n()) === 2 && !(await exprOf(3)), 'tap calc body + ⌫ deletes another scattered calc');
+    await tapSel('.calc[data-id="4"] .tok[data-i="2"]'); await back(); ok((await exprOf(4)) === '3+0' && (await n()) === 2, 'selected number: ⌫ edits only that number (3+3 → 3+0)');
+    await k('='); await p.screenshot({ path: `screens/backspace-${name}-a.png` });
+    await tapSel('#undoBtn'); await tapSel('#undoBtn'); await tapSel('#undoBtn');
+    ok((await n()) === 4 && (await res(2)) === '7', 'undo ×3 restores both deleted calcs and the link');
+    // (b) nothing selected: ⌫ eats the last-created calc backwards, then the one before
+    ok(!(await p.locator('.calc.active').count()), 'nothing selected');
+    await back(); ok((await exprOf(4)) === '3+', '⌫ with no selection edits last-created calc (3+3 → 3+)');
+    await back(); await back(); ok(!(await exprOf(4)) && (await n()) === 3, 'emptied calc is removed');
+    await back(); ok((await exprOf(3)) === '9*', 'next ⌫ continues on the previous calc (9*9 → 9*)');
+    await back(); await back(); await back(); ok(!(await exprOf(3)) && (await exprOf(2)) === '#1+', 'continues sequentially: #3 removed, #2 → #1+');
+    await back(); await back(); ok((await n()) === 1 && (await exprOf(1)) === '1+1', '#2 removed, then on to #1');
+    await back(); await back(); await back(); ok((await n()) === 0, 'all calcs eaten');
+    for (let i = 0; i < 12; i++) await tapSel('#undoBtn');
+    ok((await n()) === 4 && (await res(2)) === '7' && (await res(4)) === '6', 'undo restores everything');
+    await ctx.close();
+  }
   ok(!errs.length, 'console errors: ' + (errs.join(' / ') || 'none'));
   await b.close(); console.log(fails ? `${fails} FAILED` : 'ALL PASSED'); process.exit(fails ? 1 : 0);
 })();
