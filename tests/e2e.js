@@ -3,7 +3,7 @@ const {chromium}=require('playwright-core');
 for(const [w,h,name,dark] of [[412,915,'folded',false],[884,1104,'unfolded',true]]){
  const ctx=await b.newContext({viewport:{width:w,height:h},hasTouch:true,isMobile:true,deviceScaleFactor:2,colorScheme:dark?'dark':'light'});
  const p=await ctx.newPage();p.on('console',m=>m.type()==='error'&&errs.push(m.text()));p.on('pageerror',e=>errs.push(e.message));
- await p.goto('http://localhost:8765/');await p.screenshot({path:`screens/${name}-empty.png`});
+ await p.goto(''+(process.env.URL||"http://localhost:8765/")+'');await p.screenshot({path:`screens/${name}-empty.png`});
  const k=async s=>{for(const c of (s==='back'?[s]:s))await p.click(`#pad button[data-k="${c}"]`)};
  await p.mouse.click(40,60);await k('200+10%');await k('=');
  await p.mouse.click(40,160);await k('50*10%=');
